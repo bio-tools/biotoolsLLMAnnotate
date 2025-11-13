@@ -42,6 +42,8 @@ biotools-annotate --write-default-config
 
 ### Pub2Tools Configuration
 
+> **Folder Behavior**: When the Pub2Tools CLI is invoked, outputs are cached in `out/pub2tools/range_<from>_to_<to>/` based on the date parameters. This canonical folder is reused across runs with identical date ranges, with existing outputs overwritten. These intermediate files are ephemeral—the main pipeline preserves full run history in `out/range_*/` folders.
+
 #### `pub2tools.edam_owl`
 - **Type**: String (URL)
 - **Default**: `http://edamontology.org/EDAM.owl`

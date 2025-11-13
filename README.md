@@ -53,7 +53,9 @@ biotoolsannotate --resume-from-enriched --resume-from-scoring --dry-run
 ```
 
 ## Configuration
-Configuration is YAML-driven. The CLI loads `config.yaml` from the project root by default and falls back to internal defaults when absent. All placeholders marked `__VERSION__` resolve to the installed package version at runtime. During each run the pipeline scans the Pub2Tools export folders (for example `pub2tools/to_biotools.json` or `pub2tools/biotools_entries.json`) and uses them to flag candidates already present in bio.tools; you can also point to any standalone registry snapshot via `pipeline.registry_path` or `--registry` when you want to bypass Pub2Tools exports entirely.
+Configuration is YAML-driven. The CLI loads `config.yaml` from the project root by default and falls back to internal defaults when absent. All placeholders marked `__VERSION__` resolve to the installed package version at runtime. 
+
+During each run the pipeline scans the Pub2Tools export folders (for example `pub2tools/to_biotools.json` or `pub2tools/biotools_entries.json`) and uses them to flag candidates already present in bio.tools. When the Pub2Tools CLI is invoked, outputs are cached in `out/pub2tools/range_<from>_to_<to>/` and reused across runs with identical date parameters. You can also point to any standalone registry snapshot via `pipeline.registry_path` or `--registry` when you want to bypass Pub2Tools exports entirely.
 
 ### Core settings
 | Purpose | Config key | CLI flag | Notes |

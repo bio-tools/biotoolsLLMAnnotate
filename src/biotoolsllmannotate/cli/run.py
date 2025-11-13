@@ -1691,6 +1691,10 @@ def execute_run(
             registry_search_roots.append(resume_export_path.parent)
         if env_input:
             registry_search_roots.append(Path(env_input).parent)
+        # Also search canonical global pub2tools cache (e.g., out/pub2tools/range_2025-01-01_to_2025-01-15/)
+        global_pub2tools_cache = Path("out/pub2tools") / time_period_label
+        if global_pub2tools_cache not in registry_search_roots:
+            registry_search_roots.append(global_pub2tools_cache)
 
         registry_candidates.extend(registry_search_roots)
 
