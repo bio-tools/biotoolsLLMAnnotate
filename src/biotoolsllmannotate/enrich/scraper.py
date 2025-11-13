@@ -253,6 +253,23 @@ _REPO_NAV_PATH_PREFIXES = (
     "/network",
     "/graphs",
     "/pulse",
+    "/activity",
+    # Additional common repo navigation endpoints that should not be treated as docs
+    "/releases",
+    "/tags",
+    "/commits",
+    "/commit",
+    "/compare",
+    "/branches",
+    "/branch",
+    "/contributors",
+    "/stargazers",
+    "/watchers",
+    "/forks",
+    "/milestones",
+    "/labels",
+    # Bitbucket style
+    "/pull-requests",
 )
 
 _REPO_NAV_TEXT = {
@@ -271,6 +288,19 @@ _REPO_NAV_TEXT = {
     "network",
     "graphs",
     "pulse",
+    "activity",
+    # Additional items commonly shown in repo nav bars
+    "releases",
+    "release",
+    "tags",
+    "commits",
+    "branches",
+    "contributors",
+    "stargazers",
+    "watchers",
+    "forks",
+    "milestones",
+    "labels",
 }
 
 
@@ -318,6 +348,61 @@ def _sanitize_anchor_text(anchor: Tag) -> str:
     return anchor.get_text(separator=" ", strip=True)
 
 
+def _is_github_global_nav_link(resolved_url: str) -> bool:
+    """Return True if the URL points to GitHub's global navigation (features, docs, blog, support) rather than a repo."""
+    try:
+        parsed = urlparse(resolved_url)
+    except Exception:
+        return False
+    host = (parsed.netloc or "").lower()
+
+    # Direct platform subdomain/domain checks
+    if host in (
+        "docs.github.com",
+        "support.github.com",
+        "github.blog",
+        "maintainers.github.com",
+        "github.community",
+    ):
+        return True
+
+    # GitHub.com global navigation
+    if host == "github.com":
+        path_lower = (parsed.path or "").lower()
+        # Check for GitHub's top-level features/about/blog paths
+        global_prefixes = (
+            "/features",
+            "/enterprise",
+            "/team",
+            "/customer-stories",
+            "/pricing",
+            "/resources",
+            "/about",
+            "/blog",
+            "/changelog",
+            "/events",
+            "/explore",
+            "/topics",
+            "/collections",
+            "/trending",
+            "/sponsors",
+            "/github-copilot",
+            "/solutions",
+            "/settings",
+            "/notifications",
+            "/login",
+            "/signup",
+            "/join",
+            "/premium-support",
+            "/contact",
+        )
+        for prefix in global_prefixes:
+            if path_lower == prefix or path_lower.startswith(prefix + "/"):
+                return True
+
+    return False
+
+
 def _is_repo_navigation_link(resolved_url: str, anchor_text: str) -> bool:
     try:
         parsed = urlparse(resolved_url)
@@ -331,7 +416,13 @@ def _is_repo_navigation_link(resolved_url: str, anchor_text: str) -> bool:
     if text_lower in _REPO_NAV_TEXT:
         return True
     for prefix in _REPO_NAV_PATH_PREFIXES:
-        if path_lower == prefix or path_lower.startswith(prefix + "/"):
+        # Check if path matches exactly, starts with prefix/, ends with prefix, or contains /prefix/ or /prefix
+        if (
+            path_lower == prefix
+            or path_lower.startswith(prefix + "/")
+            or path_lower.endswith(prefix)
+            or f"/{prefix.lstrip('/')}/" in path_lower
+        ):
             return True
     return False
 
@@ -632,6 +723,9 @@ def extract_metadata(html_content: str, base_url: str) -> dict[str, Any]:
         matching_keywords = match_documentation_keywords(text_raw, href)
 
         if _is_repo_navigation_link(resolved, text_raw):
+            continue
+
+        if _is_github_global_nav_link(resolved):
             continue
 
         if _is_layout_ancestor(anchor) and not matching_keywords:

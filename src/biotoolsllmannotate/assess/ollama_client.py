@@ -1,7 +1,8 @@
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
+from uuid import uuid4
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -16,6 +17,14 @@ class OllamaConnectionError(Exception):
     pass
 
 
+class OllamaGenerationError(ValueError):
+    """Raised when the LLM response cannot be parsed into JSON."""
+
+    def __init__(self, message: str, trace_payload: dict[str, Any]):
+        super().__init__(message)
+        self.trace_payload = trace_payload
+
+
 class OllamaClient:
     """Wrapper for interacting with local Ollama LLM server with connection pooling and retries."""
 
@@ -23,8 +32,15 @@ class OllamaClient:
         self.config = config or get_config_yaml()
         ollama_cfg = self.config.get("ollama", {}) or {}
         self.base_url = base_url or ollama_cfg.get("host", "http://localhost:11434")
-        log_path = self.config.get("logging", {}).get("llm_log")
-        self.llm_log_path = Path(log_path) if log_path else Path("out/logs/ollama.log")
+        logging_cfg = self.config.get("logging", {}) or {}
+        log_path = logging_cfg.get("llm_log")
+        trace_path = logging_cfg.get("llm_trace")
+        self.llm_log_path = (
+            Path(log_path) if log_path else Path("out/logs/ollama/ollama.log")
+        )
+        self.llm_trace_path = (
+            Path(trace_path) if trace_path else Path("out/ollama/trace.jsonl")
+        )
         raw_force_json = ollama_cfg.get("force_json_format", True)
         if isinstance(raw_force_json, str):
             self.force_json_format = raw_force_json.strip().lower() not in {
@@ -70,6 +86,28 @@ class OllamaClient:
         if self.top_p <= 0:
             self.top_p = 1.0
 
+        # Timeout for Ollama API requests (in seconds)
+        raw_timeout = ollama_cfg.get("timeout", 300)
+        try:
+            self.timeout = int(raw_timeout)
+            if self.timeout <= 0:
+                self.timeout = 300
+        except (TypeError, ValueError):
+            self.timeout = 300
+
+        # Context window size (num_ctx parameter for Ollama)
+        # Default to None to use the model's default; set explicitly to override
+        raw_num_ctx = ollama_cfg.get("num_ctx")
+        if raw_num_ctx is not None:
+            try:
+                self.num_ctx = int(raw_num_ctx)
+                if self.num_ctx <= 0:
+                    self.num_ctx = None
+            except (TypeError, ValueError):
+                self.num_ctx = None
+        else:
+            self.num_ctx = None
+
         # Setup session with connection pooling and retries
         self.session = requests.Session()
         retry_strategy = Retry(
@@ -84,7 +122,15 @@ class OllamaClient:
         self.session.mount("https://", adapter)
         self.session.headers.update({"Connection": "keep-alive"})
 
-    def generate(self, prompt, model=None, temperature=None, top_p=None, seed=None):
+    def generate(
+        self,
+        prompt,
+        model=None,
+        temperature=None,
+        top_p=None,
+        seed=None,
+        trace_context: Optional[dict[str, Any]] = None,
+    ) -> tuple[str, dict[str, Any]]:
         from tenacity import retry, stop_after_attempt, wait_fixed
 
         max_attempts = max(1, 1 + self.max_retries)
@@ -96,7 +142,9 @@ class OllamaClient:
             reraise=True,
         )
         def _call():
-            resolved_temperature = self.temperature if temperature is None else temperature
+            resolved_temperature = (
+                self.temperature if temperature is None else temperature
+            )
             try:
                 resolved_temperature = float(resolved_temperature)
             except (TypeError, ValueError):
@@ -122,11 +170,15 @@ class OllamaClient:
                 payload["format"] = "json"
             if seed is not None:
                 payload["seed"] = seed
+            if self.num_ctx is not None:
+                payload["options"] = payload.get("options", {})
+                payload["options"]["num_ctx"] = self.num_ctx
+            trace_payload = self._build_trace_payload(prompt, payload, trace_context)
             try:
                 resp = self.session.post(
                     f"{self.base_url}/api/generate",
                     json=payload,
-                    timeout=self.config.get("ollama_timeout", 300),
+                    timeout=self.timeout,
                 )
                 resp.raise_for_status()
             except requests.exceptions.HTTPError as e:
@@ -141,13 +193,25 @@ class OllamaClient:
                     f"Failed to connect to Ollama at {self.base_url}: {e}"
                 ) from e
             combined = ""
+            thinking_text = ""
             for line in resp.text.strip().splitlines():
                 try:
                     obj = json.loads(line)
-                    if isinstance(obj, dict) and "response" in obj:
-                        combined += obj["response"]
+                    if isinstance(obj, dict):
+                        # Collect response field (the actual output)
+                        if "response" in obj and obj["response"]:
+                            combined += obj["response"]
+                        # Collect thinking field separately (chain-of-thought reasoning)
+                        # Some models like qwen3 use this for intermediate reasoning
+                        if "thinking" in obj and obj["thinking"]:
+                            thinking_text += obj["thinking"]
                 except Exception:
                     continue
+
+            # Prefer actual response; fall back to thinking if no response was generated
+            # This handles models that only emit thinking without a final response field
+            final_output = combined if combined else thinking_text
+            trace_payload["response_text"] = final_output or resp.text
 
             def _attempt_parse(text: str) -> str | None:
                 start = text.find("{")
@@ -161,16 +225,20 @@ class OllamaClient:
                 except json.JSONDecodeError:
                     return None
 
-            final_json = _attempt_parse(combined)
+            final_json = _attempt_parse(final_output)
             if final_json is None:
                 final_json = _attempt_parse(resp.text)
 
             if final_json is not None:
                 self._log_exchange(payload, final_json, is_json=True)
-                return final_json
+                trace_payload["response_json_text"] = final_json
+                return final_json, trace_payload
 
-            self._log_exchange(payload, combined, is_json=False)
-            raise ValueError("No valid JSON object found in Ollama response")
+            self._log_exchange(payload, final_output, is_json=False)
+            raise OllamaGenerationError(
+                "No valid JSON object found in Ollama response",
+                trace_payload,
+            )
 
         return _call()
 
@@ -216,5 +284,60 @@ class OllamaClient:
                     pretty += "\n"
                 f.write(pretty)
                 f.write("==== END OLLAMA REQUEST\n\n")
+        except Exception:
+            pass
+
+    def _build_trace_payload(
+        self,
+        prompt: str,
+        payload: dict[str, Any],
+        trace_context: Optional[dict[str, Any]],
+    ) -> dict[str, Any]:
+        context = trace_context or {}
+        options: dict[str, Any] = {}
+        for key in ("model", "temperature", "top_p", "format", "seed"):
+            if key in payload and payload[key] is not None:
+                options[key] = payload[key]
+        # Include nested options like num_ctx
+        if "options" in payload and isinstance(payload["options"], dict):
+            options["options"] = payload["options"]
+        return {
+            "trace_id": uuid4().hex,
+            "prompt": prompt,
+            "options": options,
+            "attempt": context.get("attempt"),
+            "prompt_kind": context.get("prompt_kind", "base"),
+            "response_text": "",
+        }
+
+    def write_trace_entry(
+        self,
+        trace_payload: Optional[dict[str, Any]],
+        *,
+        status: str,
+        response_json: Any | None,
+        schema_errors: Optional[list[str]] = None,
+    ) -> None:
+        if not trace_payload:
+            return
+        entry: dict[str, Any] = {
+            "trace_id": trace_payload.get("trace_id"),
+            "timestamp": datetime.now(UTC).isoformat(),
+            "attempt": trace_payload.get("attempt"),
+            "prompt_kind": trace_payload.get("prompt_kind"),
+            "prompt": trace_payload.get("prompt", ""),
+            "request_options": trace_payload.get("options", {}),
+            "response_text": trace_payload.get("response_text", ""),
+            "status": status,
+        }
+        if response_json is not None:
+            entry["response_json"] = response_json
+        if schema_errors:
+            entry["schema_errors"] = schema_errors
+        try:
+            self.llm_trace_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.llm_trace_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(entry, ensure_ascii=False))
+                fh.write("\n")
         except Exception:
             pass

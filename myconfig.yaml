@@ -1,11 +1,11 @@
 pipeline:
-  input_path: out/biotools_in/biotools_negatives.json
-  registry_path: null
+  custom_pub2tools_biotools_json: null
+  registry_path: out/biotools_in/biotools.json
   payload_version: "__VERSION__"
-  from_date: "2024-01-01"
-  to_date: "2024-01-15"
+  from_date: "2025-01-01"
+  to_date: "2025-01-15"
   resume_from_pub2tools: false
-  resume_from_enriched: false
+  resume_from_enriched: true
   resume_from_scoring: false
   bio_score_thresholds:
     add: 0.7
@@ -37,9 +37,12 @@ enrichment:
   user_agent: biotoolsllmannotate/__VERSION__ (+https://github.com/ELIXIR-Belgium/biotoolsLLMAnnotate)
 ollama:
   host: http://localhost:11434
-  model: qwen3:8b
-  max_retries: 6
+  model: gemma3:4b #qwen3:4b #gpt-oss:20b-cloud
+  max_retries: 1
+  num_ctx: 8192
   retry_backoff_seconds: 2
+  timeout: 180
+  temperature: 0.0
   concurrency: 4
 logging:
   level: INFO

@@ -33,7 +33,7 @@ pipeline:
     review: 0.5
   limit: null
   dry_run: false
-  input_path: null
+  custom_pub2tools_biotools_json: null
   offline: false
   from_date: '2024-01-01'
   to_date: null

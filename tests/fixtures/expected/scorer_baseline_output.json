@@ -24,7 +24,16 @@
     "model": "fixture-model",
     "model_params": {
         "attempts": 1,
-        "schema_errors": []
+        "schema_errors": [],
+        "trace_attempts": [
+            {
+                "trace_id": "fixture-trace",
+                "prompt_kind": "base",
+                "attempt": 1,
+                "status": "success",
+                "schema_errors": []
+            }
+        ]
     },
     "origin_types": [
         "title",

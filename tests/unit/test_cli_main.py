@@ -24,7 +24,7 @@ def test_conflicting_resume_and_input_exits_with_message(tmp_path):
     """Resume-from-pub2tools and explicit input conflict returns exit code 2."""
     config_data = copy.deepcopy(DEFAULT_CONFIG_YAML)
     pipeline_cfg = config_data.setdefault("pipeline", {})
-    pipeline_cfg["input_path"] = "out/positives.json"
+    pipeline_cfg["custom_pub2tools_biotools_json"] = "out/positives.json"
     pipeline_cfg["resume_from_pub2tools"] = True
     pipeline_cfg["resume_from_enriched"] = False
     pipeline_cfg["resume_from_scoring"] = False
@@ -41,5 +41,5 @@ def test_conflicting_resume_and_input_exits_with_message(tmp_path):
     output = result.output or ""
     output = click.utils.strip_ansi(output)
     assert "Invalid value for --resume-from-pub2tools" in output
-    assert "pipeline.input_path" in output
+    assert "pipeline.custom_pub2tools_biotools_json" in output
     assert "Traceback" not in output

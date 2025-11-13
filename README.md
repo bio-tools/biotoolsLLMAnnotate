@@ -58,7 +58,7 @@ Configuration is YAML-driven. The CLI loads `config.yaml` from the project root 
 ### Core settings
 | Purpose | Config key | CLI flag | Notes |
 | --- | --- | --- | --- |
-| Input source | `pipeline.input_path` | `--input PATH` | Prefer a local JSON export instead of running Pub2Tools |
+| Custom input | `pipeline.custom_pub2tools_biotools_json` | `--custom-pub2tools-json PATH` | Use a custom Pub2Tools to_biotools.json export instead of date-based fetching |
 | Registry snapshot | `pipeline.registry_path` | `--registry PATH` | Supply an external bio.tools JSON/JSONL snapshot for membership checks |
 | Date range | `pipeline.from_date`, `pipeline.to_date` | `--from-date`, `--to-date` | Accepts relative windows like `7d` or ISO dates |
 | Thresholds | `pipeline.min_bio_score`, `pipeline.min_documentation_score` | `--min-bio-score`, `--min-doc-score` | Set both via legacy `--min-score` if desired |
@@ -104,7 +104,8 @@ The selected folder contains:
 | `reports/assessment.jsonl` | Line-delimited scoring results (bio score, doc score, rationale) |
 | `reports/assessment.csv` | Spreadsheet-friendly summary of the JSONL file (includes `in_biotools` and `confidence_score` columns when Pub2Tools snapshots are present) |
 | `cache/enriched_candidates.json.gz` | Cached candidates after enrichment for quick resumes |
-| `logs/ollama.log` | Append-only log of all LLM scoring prompts and responses |
+| `logs/ollama/ollama.log` | Human-readable append-only log of every LLM request and response |
+| `ollama/trace.jsonl` | Machine-readable trace with prompt variants, options, statuses, and parsed JSON payloads |
 | `config.generated.yaml` or `<original-config>.yaml` | Snapshot of the configuration used for the run |
 
 ### LLM telemetry
@@ -116,6 +117,7 @@ Each record in `reports/assessment.jsonl` carries a `model_params` object descri
 | `attempts` | Number of prompt/response cycles the scorer performed (minimum 1) |
 | `schema_errors` | Ordered list of validation errors returned by the JSON schema validator for each failed attempt |
 | `prompt_augmented` | `true` when the scorer appended schema error feedback to the prompt before retrying |
+| `trace_attempts` | Ordered list of trace metadata objects (`trace_id`, `attempt`, `prompt_kind`, `status`, `schema_errors`) that aligns with the JSONL trace for reproducible auditing |
 
 These diagnostics mirror the telemetry requirement captured in OpenSpec and help correlate downstream decisions with LLM stability. Consumers that previously ignored `model_params` should update their parsers to accommodate the new keys.
 

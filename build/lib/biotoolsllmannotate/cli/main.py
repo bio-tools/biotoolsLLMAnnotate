@@ -6,7 +6,7 @@ from pathlib import Path
 from .. import __version__
 
 app = typer.Typer(
-    help="CLI to fetch Pub2Tools candidates, enrich, score, and emit bio.tools annotations with a live Rich scoreboard.\n\nExamples:\n  python -m biotoolsllmannotate --from-date 2024-01-01 --to-date 2024-01-31 --min-score 0.6\n  python -m biotoolsllmannotate --input tests/fixtures/pub2tools/sample.json --dry-run\n  python -m biotoolsllmannotate --write-default-config  # scaffold config.yaml with presets\n  python -m biotoolsllmannotate --offline --quiet\n\nTip: Use --resume-from-pub2tools (or set pipeline.resume_from_pub2tools: true) to reuse the latest Pub2Tools export without rerunning the CLI.",
+    help="CLI to fetch Pub2Tools candidates, enrich, score, and emit bio.tools annotations with a live Rich scoreboard.\n\nExamples:\n  python -m biotoolsllmannotate --from-date 2024-01-01 --to-date 2024-01-31 --min-score 0.6\n  python -m biotoolsllmannotate --custom-pub2tools-json tests/fixtures/pub2tools/sample.json --dry-run\n  python -m biotoolsllmannotate --write-default-config  # scaffold config.yaml with presets\n  python -m biotoolsllmannotate --offline --quiet\n\nTip: Use --resume-from-pub2tools (or set pipeline.resume_from_pub2tools: true) to reuse the latest Pub2Tools export without rerunning the CLI.",
     add_completion=False,
 )
 
@@ -140,8 +140,10 @@ def _run_impl(
     p2t_out: str | None = typer.Option(
         None, "--p2t-out", help="Path to Pub2Tools output JSON."
     ),
-    input_path: str | None = typer.Option(
-        None, "--input", help="Preferred input path (overrides Pub2Tools fetch)."
+    custom_pub2tools_biotools_json: str | None = typer.Option(
+        None,
+        "--custom-pub2tools-json",
+        help="Path to custom Pub2Tools to_biotools.json export (overrides date-based fetch).",
     ),
     registry_path: str | None = typer.Option(
         None,
@@ -168,7 +170,7 @@ def _run_impl(
 
     Examples:
         biotools-annotate run --from-date 2024-01-01 --to-date 2024-01-31 --min-score 0.6
-        biotools-annotate run --input tests/fixtures/pub2tools/sample.json --dry-run
+        biotools-annotate run --custom-pub2tools-json tests/fixtures/pub2tools/sample.json --dry-run
         biotools-annotate run --write-default-config
         biotools-annotate run --offline --quiet
 
@@ -240,18 +242,18 @@ def _run_impl(
         config_concurrency = ollama_cfg.get("concurrency")
         if config_concurrency is not None:
             concurrency = config_concurrency
-    if input_path is None:
-        config_input = pipeline_cfg.get("input_path")
+    if custom_pub2tools_biotools_json is None:
+        config_input = pipeline_cfg.get("custom_pub2tools_biotools_json")
         if config_input:
-            input_path = config_input
+            custom_pub2tools_biotools_json = config_input
     if registry_path is None:
         config_registry = pipeline_cfg.get("registry_path")
         if config_registry:
             registry_path = config_registry
 
-    if resume_from_pub2tools and input_path:
+    if resume_from_pub2tools and custom_pub2tools_biotools_json:
         raise typer.BadParameter(
-            "cannot be used together with --input or pipeline.input_path",
+            "cannot be used together with --custom-pub2tools-json or pipeline.custom_pub2tools_biotools_json",
             param_hint="--resume-from-pub2tools",
         )
 
@@ -355,7 +357,7 @@ def _run_impl(
             dry_run=dry_run,
             model=model,
             concurrency=concurrency,
-            input_path=input_path,
+            custom_pub2tools_biotools_json=custom_pub2tools_biotools_json,
             registry_path=registry_path,
             offline=offline,
             edam_owl=edam_owl,

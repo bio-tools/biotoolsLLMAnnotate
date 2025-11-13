@@ -3,7 +3,11 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from .ollama_client import OllamaClient, OllamaConnectionError
+from .ollama_client import (
+    OllamaClient,
+    OllamaConnectionError,
+    OllamaGenerationError,
+)
 from biotoolsllmannotate.config import DEFAULT_CONFIG_YAML, get_config_yaml
 from biotoolsllmannotate.enrich import is_probable_publication_url
 
@@ -344,6 +348,7 @@ class RetryDiagnostics:
     attempts: int
     schema_errors: List[List[str]] = field(default_factory=list)
     prompt_augmented: bool = False
+    trace_attempts: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_model_params(self) -> Dict[str, Any]:
         data: Dict[str, Any] = {
@@ -352,6 +357,7 @@ class RetryDiagnostics:
         }
         if self.prompt_augmented:
             data["prompt_augmented"] = True
+        data["trace_attempts"] = self.trace_attempts
         return data
 
 
@@ -486,6 +492,7 @@ class LLMRetryManager:
     ) -> Tuple[Dict[str, Any], RetryDiagnostics]:
         errors_history: List[List[str]] = []
         last_errors: List[str] = []
+        trace_attempt_records: List[Dict[str, Any]] = []
 
         for attempt_index in range(self._max_attempts):
             prompt = (
@@ -493,10 +500,40 @@ class LLMRetryManager:
                 if attempt_index == 0
                 else prompt_builder.augment(base_prompt, last_errors)
             )
+            prompt_kind = "base" if attempt_index == 0 else "augmented"
+            trace_context = {"attempt": attempt_index + 1, "prompt_kind": prompt_kind}
+            trace_payload: dict[str, Any] | None = None
             try:
-                raw_response = self._client.generate(prompt, model=self._model)
+                raw_response, trace_payload = self._client.generate(
+                    prompt,
+                    model=self._model,
+                    trace_context=trace_context,
+                )
             except OllamaConnectionError as exc:
                 raise ValueError(f"LLM scoring failed: {exc}") from exc
+            except OllamaGenerationError as exc:
+                last_errors = [str(exc)]
+                errors_history.append(last_errors.copy())
+                self._client.write_trace_entry(
+                    exc.trace_payload,
+                    status="parse_error",
+                    response_json=None,
+                    schema_errors=last_errors,
+                )
+                trace_attempt_records.append(
+                    {
+                        "trace_id": exc.trace_payload.get("trace_id"),
+                        "prompt_kind": prompt_kind,
+                        "attempt": attempt_index + 1,
+                        "status": "parse_error",
+                        "schema_errors": last_errors.copy(),
+                    }
+                )
+                if attempt_index == self._max_attempts - 1:
+                    raise ValueError(
+                        "LLM scoring failed to produce valid JSON after retries"
+                    ) from exc
+                continue
             except ValueError as exc:
                 last_errors = [str(exc)]
                 errors_history.append(last_errors.copy())
@@ -506,12 +543,28 @@ class LLMRetryManager:
                     ) from exc
                 continue
 
+            attempt_record = {
+                "trace_id": trace_payload.get("trace_id") if trace_payload else None,
+                "prompt_kind": prompt_kind,
+                "attempt": attempt_index + 1,
+                "schema_errors": [],
+            }
+
             parsed_response, parse_error, parse_exc = self._coerce_to_mapping(
                 raw_response
             )
             if parse_error:
                 last_errors = [parse_error]
                 errors_history.append(last_errors.copy())
+                self._client.write_trace_entry(
+                    trace_payload,
+                    status="parse_error",
+                    response_json=None,
+                    schema_errors=last_errors,
+                )
+                attempt_record["status"] = "parse_error"
+                attempt_record["schema_errors"] = last_errors.copy()
+                trace_attempt_records.append(attempt_record)
                 if attempt_index == self._max_attempts - 1:
                     message = "LLM scoring produced invalid JSON after retries"
                     if parse_exc is not None:
@@ -523,6 +576,15 @@ class LLMRetryManager:
             if validation_errors:
                 last_errors = validation_errors
                 errors_history.append(validation_errors.copy())
+                self._client.write_trace_entry(
+                    trace_payload,
+                    status="schema_error",
+                    response_json=parsed_response,
+                    schema_errors=validation_errors,
+                )
+                attempt_record["status"] = "schema_error"
+                attempt_record["schema_errors"] = validation_errors.copy()
+                trace_attempt_records.append(attempt_record)
                 if attempt_index == self._max_attempts - 1:
                     joined = "; ".join(validation_errors)
                     raise ValueError(
@@ -530,10 +592,19 @@ class LLMRetryManager:
                     )
                 continue
 
+            self._client.write_trace_entry(
+                trace_payload,
+                status="success",
+                response_json=parsed_response,
+                schema_errors=None,
+            )
+            attempt_record["status"] = "success"
+            trace_attempt_records.append(attempt_record)
             diagnostics = RetryDiagnostics(
                 attempts=attempt_index + 1,
                 schema_errors=errors_history.copy(),
                 prompt_augmented=attempt_index > 0 and bool(errors_history),
+                trace_attempts=trace_attempt_records.copy(),
             )
             return parsed_response, diagnostics
 

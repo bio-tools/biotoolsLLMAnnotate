@@ -27,7 +27,7 @@ biotools-annotate --write-default-config
 
 | Config key | CLI flag | Description |
 | --- | --- | --- |
-| `pipeline.input_path` | `--input` | Load tool candidates from an existing JSON export |
+| `pipeline.custom_pub2tools_biotools_json` | `--custom-pub2tools-json` | Load tool candidates from a custom Pub2Tools to_biotools.json export (overrides date-based fetch) |
 | `pipeline.registry_path` | `--registry` | Load bio.tools registry snapshot to check for existing entries |
 | `pipeline.from_date` / `pipeline.to_date` | `--from-date` / `--to-date` | Control date window for gathering candidates |
 | `pipeline.resume_from_enriched` | `--resume-from-enriched` | Reuse cached enriched tool candidates |
@@ -100,7 +100,7 @@ biotools-annotate --write-default-config
 
 ### Pipeline Configuration
 
-> **Note:** All pipeline artifacts are written to a dedicated folder using fixed filenames: either the time-period path (`out/<time-period>/…`) when Pub2Tools ingestion is active, or `out/custom_tool_set/...` when `pipeline.input_path`/`--input`/`BIOTOOLS_ANNOTATE_INPUT` is used (resume flags reuse the same directory). After each run the active configuration file (or a generated snapshot) is copied into that folder for record keeping.
+> **Note:** All pipeline artifacts are written to a dedicated folder using fixed filenames: either the time-period path (`out/range_YYYY-MM-DD_to_YYYY-MM-DD/…`) when using date-based Pub2Tools fetching, or `out/custom_tool_set/...` when `pipeline.custom_pub2tools_biotools_json`/`--custom-pub2tools-json`/`BIOTOOLS_ANNOTATE_INPUT` is explicitly set. The directory structure is determined solely by the presence of a custom input file - resume flags do NOT affect this decision. After each run the active configuration file (or a generated snapshot) is copied into that folder for record keeping.
 
 #### `pipeline.resume_from_enriched`
 - **Type**: Boolean
@@ -113,12 +113,13 @@ biotools-annotate --write-default-config
 - **Default**: `"__VERSION__"`
 - **Description**: Version string stored alongside the updated entries payload; the placeholder resolves to the installed package version.
 
-#### `pipeline.input_path`
+#### `pipeline.custom_pub2tools_biotools_json`
 - **Type**: String (path) or null
 - **Default**: `null`
-- **Description**: Preferred input file (overrides Pub2Tools fetch)
-- **CLI equivalent**: `--input`
-- **Example**: `"data/candidates.json"`
+- **Description**: Path to a custom Pub2Tools `to_biotools.json` export file. When set, this overrides date-based Pub2Tools fetching and causes the pipeline to use `out/custom_tool_set/` as the output directory. When null (default), date-based fetching is used with `out/range_YYYY-MM-DD_to_YYYY-MM-DD/` as the output directory.
+- **CLI equivalent**: `--custom-pub2tools-json`
+- **Example**: `"data/to_biotools.json"`
+- **Migration note**: This parameter was previously named `pipeline.input_path`. The old name is deprecated but still supported with a warning.
 
 #### `pipeline.registry_path`
 - **Type**: String (path) or null
@@ -179,6 +180,20 @@ biotools-annotate --write-default-config
 - **Description**: Fixed delay between Ollama retry attempts (applied to both HTTP session retries and LLM generation retries).
 - **Example**: `0.5`
 
+#### `ollama.timeout`
+- **Type**: Integer (seconds)
+- **Default**: `300`
+- **Description**: Timeout for individual Ollama API requests. Increase this value if using slower models or complex prompts that exceed 5 minutes to generate.
+- **Example**: `600` (10 minutes), `120` (2 minutes for fast models)
+- **Note**: For qwen3:4b and similar lightweight models, consider reducing to `120-180` seconds to fail fast on stuck requests.
+
+#### `ollama.temperature`
+- **Type**: Float
+- **Default**: `0.01`
+- **Description**: Sampling temperature for LLM generation. Lower values (near 0) produce more deterministic outputs; higher values increase randomness.
+- **Range**: `0.0` to `2.0`
+- **Example**: `0.0` (maximum determinism), `0.7` (creative), `1.0` (balanced)
+
 #### `ollama.force_json_format`
 - **Type**: Boolean
 - **Default**: `true`
@@ -198,6 +213,18 @@ biotools-annotate --write-default-config
 - **CLI equivalent**: `--concurrency`
 - **Example**: `16`
 
+#### `ollama.num_ctx`
+- **Type**: Integer or null
+- **Default**: `null` (uses model default)
+- **Description**: Context window size in tokens for the Ollama model. When set, overrides the model's default context length. Required for models with large context windows to prevent prompt truncation.
+- **Important**: Ollama defaults to 4096 tokens if not specified, which may truncate prompts for models that support larger contexts (e.g., qwen2.5:4b supports 32K tokens).
+- **Example**: `8192`, `16384`, `32768`
+- **Recommended values**:
+  - `qwen2.5:4b`, `qwen2.5:7b`: `16384` or `32768`
+  - `llama3.2:3b`: `131072` (128K)
+  - `gemma2:9b`: `8192`
+- **Note**: Higher values consume more memory. Monitor your system resources when increasing context size.
+
 ### Logging Configuration
 
 #### `logging.level`
@@ -212,6 +239,16 @@ biotools-annotate --write-default-config
 - **Default**: `null` (console only)
 - **Description**: Log file path
 - **Example**: `"logs/biotools-annotate.log"`
+
+#### `logging.llm_log`
+- **Type**: String (path)
+- **Default**: `"out/logs/ollama/ollama.log"`
+- **Description**: Human-readable append-only log that captures every Ollama request and response for post-run inspection.
+
+#### `logging.llm_trace`
+- **Type**: String (path)
+- **Default**: `"out/ollama/trace.jsonl"`
+- **Description**: Machine-readable JSONL trace containing per-attempt metadata (prompt variants, request options, status, schema errors) for reproducible auditing and downstream analysis.
 
 ### Europe PMC Enrichment
 

@@ -30,7 +30,7 @@ DEFAULT_CONFIG_YAML = {
         "fetcher_threads": 4,
     },
     "pipeline": {
-        "input_path": None,
+        "custom_pub2tools_biotools_json": None,
         "registry_path": None,
         "payload_version": __version__,
         "resume_from_enriched": False,
@@ -58,6 +58,8 @@ DEFAULT_CONFIG_YAML = {
     "logging": {
         "level": "INFO",
         "file": None,
+        "llm_log": "out/logs/ollama/ollama.log",
+        "llm_trace": "out/ollama/trace.jsonl",
     },
     "enrichment": {
         "europe_pmc": {
@@ -253,6 +255,25 @@ def load_yaml_config(path=None):
         return DEFAULT_CONFIG_YAML.copy()
 
 
+def _check_deprecated_parameters(config):
+    """Check for deprecated parameter names and warn user."""
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    if config and "pipeline" in config:
+        pipeline = config["pipeline"]
+        if "input_path" in pipeline:
+            logger.warning(
+                "Configuration uses deprecated 'pipeline.input_path'. "
+                "Please rename it to 'pipeline.custom_pub2tools_biotools_json'. "
+                "The old name will be removed in a future version."
+            )
+            # Auto-migrate for backward compatibility
+            if "custom_pub2tools_biotools_json" not in pipeline:
+                pipeline["custom_pub2tools_biotools_json"] = pipeline["input_path"]
+
+
 def get_config_yaml(config_path=None, validate=True):
     """
     Load config from YAML file, falling back to defaults.
@@ -265,6 +286,9 @@ def get_config_yaml(config_path=None, validate=True):
     final_config = copy.deepcopy(DEFAULT_CONFIG_YAML) if not config else config
     final_config = _replace_version_placeholders(final_config)
     final_config = _replace_version_placeholders(final_config)
+
+    # Check for deprecated parameters
+    _check_deprecated_parameters(final_config)
 
     if validate:
         # Import here to avoid circular imports

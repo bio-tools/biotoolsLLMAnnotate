@@ -22,7 +22,7 @@ def test_end_to_end_on_fixture(tmp_path):
             "biotoolsllmannotate",
             "--from-date",
             "7d",
-            "--input",
+            "--custom-pub2tools-json",
             str(fixture),
             "--offline",
         ],

@@ -24,6 +24,7 @@ src/biotoolsllmannotate/enrich/__init__.py
 src/biotoolsllmannotate/enrich/europe_pmc.py
 src/biotoolsllmannotate/enrich/repo.py
 src/biotoolsllmannotate/enrich/scraper.py
+src/biotoolsllmannotate/enrich/utils.py
 src/biotoolsllmannotate/ingest/__init__.py
 src/biotoolsllmannotate/ingest/dedup.py
 src/biotoolsllmannotate/ingest/pub2tools_client.py

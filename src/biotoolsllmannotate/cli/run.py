@@ -681,7 +681,7 @@ ALLOWED_ENTRY_FIELDS = set(BioToolsEntry.model_fields.keys())
 def _prepare_output_structure(logger, base: Path | str = Path("out")) -> None:
     base_path = Path(base)
     base_path.mkdir(parents=True, exist_ok=True)
-    for folder in ("exports", "reports", "cache", "logs", "pub2tools"):
+    for folder in ("exports", "reports", "cache", "logs", "pub2tools", "ollama"):
         (base_path / folder).mkdir(parents=True, exist_ok=True)
 
     legacy_root = Path("out")
@@ -700,7 +700,18 @@ def _prepare_output_structure(logger, base: Path | str = Path("out")) -> None:
             legacy_root / "enriched_candidates.json.gz",
             base_path / "cache" / "enriched_candidates.json.gz",
         ),
-        (legacy_root / "ollama.log", base_path / "logs" / "ollama.log"),
+        (
+            legacy_root / "ollama.log",
+            base_path / "logs" / "ollama" / "ollama.log",
+        ),
+        (
+            legacy_root / "ollama-trace.jsonl",
+            base_path / "ollama" / "trace.jsonl",
+        ),
+        (
+            base_path / "logs" / "ollama" / "trace.jsonl",
+            base_path / "ollama" / "trace.jsonl",
+        ),
     ]
 
     pipeline = base_path / "pipeline"
@@ -726,7 +737,18 @@ def _prepare_output_structure(logger, base: Path | str = Path("out")) -> None:
                 pipeline / "cache" / "enriched_candidates.json.gz",
                 base_path / "cache" / "enriched_candidates.json.gz",
             ),
-            (pipeline / "logs" / "ollama.log", base_path / "logs" / "ollama.log"),
+            (
+                pipeline / "logs" / "ollama.log",
+                base_path / "logs" / "ollama" / "ollama.log",
+            ),
+            (
+                pipeline / "logs" / "ollama-trace.jsonl",
+                base_path / "ollama" / "trace.jsonl",
+            ),
+            (
+                pipeline / "ollama" / "trace.jsonl",
+                base_path / "ollama" / "trace.jsonl",
+            ),
         ]
     )
 
@@ -954,7 +976,9 @@ def _load_enriched_candidates(path: Path) -> list[dict[str, Any]]:
     return [c for c in data if isinstance(c, dict)]
 
 
-def _find_latest_pub2tools_export(*bases: Path) -> Path | None:
+def _find_latest_pub2tools_export(
+    *bases: Path, time_period_label: str | None = None
+) -> Path | None:
     candidates: list[tuple[float, Path]] = []
     for base in bases:
         if base is None:
@@ -990,6 +1014,19 @@ def _find_latest_pub2tools_export(*bases: Path) -> Path | None:
                 continue
     if not candidates:
         return None
+
+    # If a time period label is provided, prioritize exports that match it
+    if time_period_label:
+        matching = [
+            c
+            for c in candidates
+            if _export_matches_time_period(c[1], time_period_label)
+        ]
+        if matching:
+            matching.sort(key=lambda item: item[0], reverse=True)
+            return matching[0][1]
+
+    # Fall back to latest by modification time
     candidates.sort(key=lambda item: item[0], reverse=True)
     return candidates[0][1]
 
@@ -1099,7 +1136,7 @@ def execute_run(
     report: Path | None = None,
     model: str | None = None,
     concurrency: int = 8,
-    input_path: str | None = None,
+    custom_pub2tools_biotools_json: str | None = None,
     registry_path: str | None = None,
     offline: bool = False,
     edam_owl: str | None = None,
@@ -1308,17 +1345,14 @@ def execute_run(
 
         base_output_root = Path(output_root) if output_root is not None else Path("out")
 
-        explicit_input = input_path or os.environ.get("BIOTOOLS_ANNOTATE_INPUT")
+        explicit_input = custom_pub2tools_biotools_json or os.environ.get(
+            "BIOTOOLS_ANNOTATE_INPUT"
+        )
         explicit_input = explicit_input or os.environ.get("BIOTOOLS_ANNOTATE_JSON")
         has_explicit_input = bool(explicit_input)
         custom_label = "custom_tool_set"
-        custom_root_exists = (base_output_root / custom_label).exists()
-        resume_from_cache = (
-            resume_from_enriched or resume_from_pub2tools or resume_from_scoring
-        )
-        use_custom_label = has_explicit_input or (
-            resume_from_cache and custom_root_exists
-        )
+        # Only use custom_tool_set when explicit input is provided (no sticky behavior)
+        use_custom_label = has_explicit_input
         if use_custom_label:
             time_period_label = custom_label
         else:
@@ -1398,8 +1432,12 @@ def execute_run(
                 )
 
         time_period_root.mkdir(parents=True, exist_ok=True)
-        for folder in ("exports", "reports", "cache", "logs", "pub2tools"):
+        for folder in ("exports", "reports", "cache", "logs", "pub2tools", "ollama"):
             (time_period_root / folder).mkdir(parents=True, exist_ok=True)
+        ollama_log_root = time_period_root / "logs" / "ollama"
+        ollama_log_root.mkdir(parents=True, exist_ok=True)
+        ollama_trace_root = time_period_root / "ollama"
+        ollama_trace_root.mkdir(parents=True, exist_ok=True)
 
         logging_cfg = config_data.get("logging")
         if not isinstance(logging_cfg, dict):
@@ -1409,9 +1447,26 @@ def execute_run(
         llm_log_path = (
             _rebase_to_time_period(llm_log_value)
             if llm_log_value is not None
-            else time_period_root / "logs" / "ollama.log"
+            else ollama_log_root / "ollama.log"
         )
         logging_cfg["llm_log"] = str(llm_log_path)
+
+        llm_trace_value = logging_cfg.get("llm_trace")
+        llm_trace_path = (
+            _rebase_to_time_period(llm_trace_value)
+            if llm_trace_value is not None
+            else ollama_trace_root / "trace.jsonl"
+        )
+        logging_cfg["llm_trace"] = str(llm_trace_path)
+
+        try:
+            Path(llm_log_path).parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        try:
+            Path(llm_trace_path).parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
 
         config_snapshot_path: Path | None = None
         if config_file_path is not None:
@@ -1508,7 +1563,9 @@ def execute_run(
                     resume_from_enriched = False
 
         if not resumed:
-            env_input = input_path or os.environ.get("BIOTOOLS_ANNOTATE_INPUT")
+            env_input = custom_pub2tools_biotools_json or os.environ.get(
+                "BIOTOOLS_ANNOTATE_INPUT"
+            )
             if not env_input:
                 env_input = os.environ.get("BIOTOOLS_ANNOTATE_JSON")
             if resume_from_pub2tools and not env_input:
@@ -1518,6 +1575,7 @@ def execute_run(
                     time_period_root / "pipeline" / "pub2tools",
                     base_output_root / "pipeline" / "pub2tools",
                     time_period_root,
+                    time_period_label=time_period_label,
                 )
                 if resume_export_path and not _export_matches_time_period(
                     resume_export_path, time_period_label

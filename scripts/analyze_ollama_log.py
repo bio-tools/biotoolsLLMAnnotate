@@ -2,7 +2,7 @@
 """Summarise Ollama scoring responses and highlight malformed payloads.
 
 This helper avoids fragile shell heredocs by living in the repo. It parses the
-append-only ``out/logs/ollama.log`` file that the CLI generates and reports:
+append-only ``out/logs/ollama/ollama.log`` file that the CLI generates and reports:
 
 * Total scoring attempts that produced a response block.
 * How many responses failed JSON parsing (e.g., truncated or extra text).
@@ -106,7 +106,9 @@ def validate_payload(payload: dict) -> Sequence[str]:
     return errors
 
 
-def analyse_log(log_path: Path, sample_limit: int) -> tuple[list[ResponseBlock], list[str]]:
+def analyse_log(
+    log_path: Path, sample_limit: int
+) -> tuple[list[ResponseBlock], list[str]]:
     """Parse the log and classify responses."""
 
     responses: list[ResponseBlock] = []
@@ -169,7 +171,7 @@ def main() -> None:
     parser.add_argument(
         "--log",
         type=Path,
-        default=Path("out/logs/ollama.log"),
+        default=Path("out/logs/ollama/ollama.log"),
         help="Path to the Ollama request/response log",
     )
     parser.add_argument(

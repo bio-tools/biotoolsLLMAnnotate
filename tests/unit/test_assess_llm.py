@@ -16,9 +16,17 @@ from biotoolsllmannotate.enrich import normalize_candidate_homepage
 
 
 class StubClient:
-    def generate(self, prompt, model=None, temperature=0.1, top_p=1.0, seed=None):
+    def generate(
+        self,
+        prompt,
+        model=None,
+        temperature=0.1,
+        top_p=1.0,
+        seed=None,
+        trace_context=None,
+    ):
         # Return out-of-range to verify clamping in scorer
-        return {
+        payload = {
             "tool_name": "GeneAnnotator",
             "homepage": "",
             "publication_ids": [],
@@ -40,6 +48,27 @@ class StubClient:
             "rationale": "test",
             "confidence_score": 1.0,
         }
+        trace_context = trace_context or {}
+        trace_payload = {
+            "trace_id": "stub-success",
+            "prompt": prompt,
+            "options": {},
+            "attempt": trace_context.get("attempt"),
+            "prompt_kind": trace_context.get("prompt_kind", "base"),
+            "response_text": json.dumps(payload),
+        }
+        return payload, trace_payload
+
+    def write_trace_entry(
+        self,
+        trace_payload,
+        *,
+        status,
+        response_json,
+        schema_errors=None,
+    ) -> None:
+        # Stubs do not persist traces during unit tests.
+        return
 
 
 def test_score_candidate_clamps_and_returns_rationale():
@@ -71,12 +100,26 @@ def test_score_candidate_clamps_and_returns_rationale():
     assert result["concise_description"] == "Concise summary."
     assert result["origin_types"] == ["title", "description"]
     assert result["confidence_score"] == 1.0
-    assert result["model_params"] == {"attempts": 1, "schema_errors": []}
+    params = result["model_params"]
+    assert params["attempts"] == 1
+    assert params["schema_errors"] == []
+    assert params["trace_attempts"]
+    assert params["trace_attempts"][0]["status"] == "success"
+    assert params["trace_attempts"][0]["prompt_kind"] == "base"
+    assert params["trace_attempts"][0]["trace_id"]
 
 
 class SubscoreClient:
-    def generate(self, prompt, model=None, temperature=0.1, top_p=1.0, seed=None):
-        return {
+    def generate(
+        self,
+        prompt,
+        model=None,
+        temperature=0.1,
+        top_p=1.0,
+        seed=None,
+        trace_context=None,
+    ):
+        payload = {
             "tool_name": "LLM Tool",
             "homepage": "https://provided.example",
             "publication_ids": ["DOI:10.1000/example"],
@@ -98,6 +141,26 @@ class SubscoreClient:
             "rationale": "Provided rationale.",
             "confidence_score": 0.75,
         }
+        trace_context = trace_context or {}
+        trace_payload = {
+            "trace_id": "subscore-success",
+            "prompt": prompt,
+            "options": {},
+            "attempt": trace_context.get("attempt"),
+            "prompt_kind": trace_context.get("prompt_kind", "base"),
+            "response_text": json.dumps(payload),
+        }
+        return payload, trace_payload
+
+    def write_trace_entry(
+        self,
+        trace_payload,
+        *,
+        status,
+        response_json,
+        schema_errors=None,
+    ) -> None:
+        return
 
 
 def test_score_candidate_averages_subscores():
@@ -126,19 +189,34 @@ def test_score_candidate_averages_subscores():
         "B5": 0.0,
     }
     assert result["confidence_score"] == pytest.approx(0.75)
-    assert result["model_params"] == {"attempts": 1, "schema_errors": []}
+    params = result["model_params"]
+    assert params["attempts"] == 1
+    assert params["schema_errors"] == []
+    assert params["trace_attempts"]
+    assert params["trace_attempts"][0]["status"] == "success"
+    assert params["trace_attempts"][0]["prompt_kind"] == "base"
+    assert params["trace_attempts"][0]["trace_id"]
 
 
 class RetryClient:
     def __init__(self):
         self.calls = 0
         self.prompts = []
+        self.trace_records = []
 
-    def generate(self, prompt, model=None, temperature=0.1, top_p=1.0, seed=None):
+    def generate(
+        self,
+        prompt,
+        model=None,
+        temperature=0.1,
+        top_p=1.0,
+        seed=None,
+        trace_context=None,
+    ):
         self.calls += 1
         self.prompts.append(prompt)
         if self.calls == 1:
-            return {
+            payload = {
                 "tool_name": "",
                 "homepage": "",
                 "publication_ids": [],
@@ -154,22 +232,49 @@ class RetryClient:
                 "rationale": "",
                 "confidence_score": 0.2,
             }
-        return {
-            "tool_name": "Retry Tool",
-            "homepage": "https://retry.example",
-            "publication_ids": ["PMID:12345"],
-            "bio_subscores": {"A1": 1, "A2": 1, "A3": 1, "A4": 1, "A5": 1},
-            "documentation_subscores": {
-                "B1": 1,
-                "B2": 1,
-                "B3": 1,
-                "B4": 1,
-                "B5": 1,
-            },
-            "concise_description": "Valid summary.",
-            "rationale": "Valid rationale.",
-            "confidence_score": 0.9,
+        else:
+            payload = {
+                "tool_name": "Retry Tool",
+                "homepage": "https://retry.example",
+                "publication_ids": ["PMID:12345"],
+                "bio_subscores": {"A1": 1, "A2": 1, "A3": 1, "A4": 1, "A5": 1},
+                "documentation_subscores": {
+                    "B1": 1,
+                    "B2": 1,
+                    "B3": 1,
+                    "B4": 1,
+                    "B5": 1,
+                },
+                "concise_description": "Valid summary.",
+                "rationale": "Valid rationale.",
+                "confidence_score": 0.9,
+            }
+        trace_context = trace_context or {}
+        trace_payload = {
+            "trace_id": f"retry-{self.calls}",
+            "prompt": prompt,
+            "options": {},
+            "attempt": trace_context.get("attempt"),
+            "prompt_kind": trace_context.get("prompt_kind", "base"),
+            "response_text": json.dumps(payload),
         }
+        return payload, trace_payload
+
+    def write_trace_entry(
+        self,
+        trace_payload,
+        *,
+        status,
+        response_json,
+        schema_errors=None,
+    ) -> None:
+        self.trace_records.append(
+            {
+                "trace_id": trace_payload.get("trace_id") if trace_payload else None,
+                "status": status,
+                "schema_errors": schema_errors or [],
+            }
+        )
 
 
 def test_score_candidate_retries_on_schema_failure():
@@ -194,11 +299,30 @@ def test_score_candidate_retries_on_schema_failure():
     assert any(
         "documentation_subscores.B5" in err for err in params["schema_errors"][0]
     )
+    assert [entry["status"] for entry in params["trace_attempts"]] == [
+        "schema_error",
+        "success",
+    ]
+    assert params["trace_attempts"][0]["trace_id"]
+    assert params["trace_attempts"][1]["trace_id"]
+    assert params["trace_attempts"][1]["prompt_kind"] == "augmented"
+    assert [record["status"] for record in retry_client.trace_records] == [
+        "schema_error",
+        "success",
+    ]
 
 
 class PublicationHomepageClient:
-    def generate(self, prompt, model=None, temperature=0.1, top_p=1.0, seed=None):
-        return {
+    def generate(
+        self,
+        prompt,
+        model=None,
+        temperature=0.1,
+        top_p=1.0,
+        seed=None,
+        trace_context=None,
+    ):
+        payload = {
             "tool_name": "Publication Tool",
             "homepage": "https://www.ncbi.nlm.nih.gov/pubmed/?term=39745644",
             "publication_ids": ["PMID:39745644"],
@@ -214,6 +338,26 @@ class PublicationHomepageClient:
             "rationale": "Rat.",
             "confidence_score": 0.8,
         }
+        trace_context = trace_context or {}
+        trace_payload = {
+            "trace_id": "publication-success",
+            "prompt": prompt,
+            "options": {},
+            "attempt": trace_context.get("attempt"),
+            "prompt_kind": trace_context.get("prompt_kind", "base"),
+            "response_text": json.dumps(payload),
+        }
+        return payload, trace_payload
+
+    def write_trace_entry(
+        self,
+        trace_payload,
+        *,
+        status,
+        response_json,
+        schema_errors=None,
+    ) -> None:
+        return
 
 
 def test_score_candidate_filters_publication_homepage_from_response():
@@ -324,10 +468,45 @@ def test_score_candidate_fixture_normalisation(tmp_path: Path) -> None:
         def __init__(self, payload: str) -> None:
             self.payload = payload
             self.calls = 0
+            self.recorded = []
 
-        def generate(self, prompt, model=None, temperature=None, top_p=None, seed=None):
+        def generate(
+            self,
+            prompt,
+            model=None,
+            temperature=None,
+            top_p=None,
+            seed=None,
+            trace_context=None,
+        ):
             self.calls += 1
-            return self.payload
+            trace_context = trace_context or {}
+            trace_payload = {
+                "trace_id": "fixture-trace",
+                "prompt": prompt,
+                "options": {},
+                "attempt": trace_context.get("attempt"),
+                "prompt_kind": trace_context.get("prompt_kind", "base"),
+                "response_text": self.payload,
+            }
+            return self.payload, trace_payload
+
+        def write_trace_entry(
+            self,
+            trace_payload,
+            *,
+            status,
+            response_json,
+            schema_errors=None,
+        ) -> None:
+            self.recorded.append(
+                {
+                    "trace_id": (
+                        trace_payload.get("trace_id") if trace_payload else None
+                    ),
+                    "status": status,
+                }
+            )
 
     scorer = Scorer(config=cfg)
     fixture_client = FixtureClient(response_payload)
