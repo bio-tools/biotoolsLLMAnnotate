@@ -662,23 +662,31 @@ def to_entry(
 ) -> dict[str, Any]:
     """
     Build bio.tools payload entry from candidate.
-    
+
     Preserves the original pub2tools structure (function, topic, link, etc.)
     and updates the description field with LLM-generated content from scores.
     """
     # Start with a deep copy of the candidate to preserve all pub2tools fields
     entry: dict[str, Any] = {}
-    
+
     # Copy all fields from candidate except those we'll explicitly override
     for key, value in c.items():
-        if key not in ("title", "urls", "tags", "in_biotools", "in_biotools_name", 
-                      "homepage_status", "homepage_error", "enrichment_context"):
+        if key not in (
+            "title",
+            "urls",
+            "tags",
+            "in_biotools",
+            "in_biotools_name",
+            "homepage_status",
+            "homepage_error",
+            "enrichment_context",
+        ):
             entry[key] = value
-    
+
     # Ensure required fields are present
     name = c.get("title") or c.get("name") or "Unnamed Tool"
     entry["name"] = str(name)
-    
+
     # Update description with LLM-generated concise_description from scores if available
     # This is the key improvement: use the scoring output description
     if scores and scores.get("concise_description"):
@@ -686,13 +694,13 @@ def to_entry(
     elif "description" not in entry or not entry["description"]:
         # Fallback to original description or generic message
         entry["description"] = c.get("description") or "Candidate tool from Pub2Tools"
-    
+
     # Update homepage if provided
     if homepage:
         entry["homepage"] = homepage
     elif "homepage" not in entry:
         entry["homepage"] = ""
-    
+
     # Ensure biotoolsID is present
     if "biotoolsID" not in entry:
         biotools_id = (
@@ -704,7 +712,7 @@ def to_entry(
         )
         if biotools_id:
             entry["biotoolsID"] = str(biotools_id)
-    
+
     return entry
 
 
