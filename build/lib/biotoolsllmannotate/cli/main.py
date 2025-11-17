@@ -46,6 +46,12 @@ def _run_impl(
         callback=lambda v: _write_default_config_callback() if v else None,
         is_eager=True,
     ),
+    validate_biotools_api: bool = typer.Option(
+        None,
+        "--validate-biotools-api/--no-validate-biotools-api",
+        help="Enable live validation of payload entries against the bio.tools API after scoring (default: config value)",
+        show_default=False,
+    ),
     edam_owl: str | None = typer.Option(
         None, "--edam-owl", help="EDAM OWL URL for Pub2Tools."
     ),
@@ -250,12 +256,30 @@ def _run_impl(
         config_registry = pipeline_cfg.get("registry_path")
         if config_registry:
             registry_path = config_registry
+    if validate_biotools_api is None:
+        config_validate = pipeline_cfg.get("validate_biotools_api")
+        if isinstance(config_validate, bool):
+            validate_biotools_api = config_validate
+        elif isinstance(config_validate, str):
+            validate_biotools_api = config_validate.strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+        else:
+            validate_biotools_api = False
 
-    if resume_from_pub2tools and custom_pub2tools_biotools_json:
-        raise typer.BadParameter(
-            "cannot be used together with --custom-pub2tools-json or pipeline.custom_pub2tools_biotools_json",
-            param_hint="--resume-from-pub2tools",
-        )
+    # Read bio.tools API base URLs from config
+    biotools_api_base = pipeline_cfg.get(
+        "biotools_api_base", "https://bio.tools/api/tool/"
+    )
+    biotools_validate_api_base = pipeline_cfg.get(
+        "biotools_validate_api_base", "https://bio.tools/api/tool/validate/"
+    )
+
+    # Note: resume_from_pub2tools and custom_pub2tools_biotools_json can work together
+    # When both are set, custom_pub2tools_biotools_json is treated as the pub2tools file to resume from
 
     # Determine score thresholds (CLI > legacy min-score > config > default)
     def _coerce_threshold(value, default):
@@ -370,6 +394,9 @@ def _run_impl(
             resume_from_enriched=resume_from_enriched,
             resume_from_pub2tools=resume_from_pub2tools,
             resume_from_scoring=resume_from_scoring,
+            validate_biotools_api=validate_biotools_api,
+            biotools_api_base=biotools_api_base,
+            biotools_validate_api_base=biotools_validate_api_base,
             config_file_path=config_source_path,
         )
     except Exception as e:

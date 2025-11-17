@@ -86,6 +86,15 @@ class OllamaClient:
         if self.top_p <= 0:
             self.top_p = 1.0
 
+        # Timeout for Ollama API requests (in seconds)
+        raw_timeout = ollama_cfg.get("timeout", 300)
+        try:
+            self.timeout = int(raw_timeout)
+            if self.timeout <= 0:
+                self.timeout = 300
+        except (TypeError, ValueError):
+            self.timeout = 300
+
         # Context window size (num_ctx parameter for Ollama)
         # Default to None to use the model's default; set explicitly to override
         raw_num_ctx = ollama_cfg.get("num_ctx")
@@ -169,7 +178,7 @@ class OllamaClient:
                 resp = self.session.post(
                     f"{self.base_url}/api/generate",
                     json=payload,
-                    timeout=self.config.get("ollama_timeout", 300),
+                    timeout=self.timeout,
                 )
                 resp.raise_for_status()
             except requests.exceptions.HTTPError as e:

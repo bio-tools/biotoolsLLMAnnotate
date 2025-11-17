@@ -1,11 +1,5 @@
-import copy
 import os
 import sys
-from pathlib import Path
-
-import click
-import yaml
-from typer.testing import CliRunner
 
 sys.path.insert(
     0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../src"))
@@ -16,30 +10,7 @@ sys.path.insert(
 for module_name in ["biotoolsllmannotate.cli.main", "biotoolsllmannotate.cli"]:
     sys.modules.pop(module_name, None)
 
-from biotoolsllmannotate.cli.main import app
-from biotoolsllmannotate.config import DEFAULT_CONFIG_YAML
-
-
-def test_conflicting_resume_and_input_exits_with_message(tmp_path):
-    """Resume-from-pub2tools and explicit input conflict returns exit code 2."""
-    config_data = copy.deepcopy(DEFAULT_CONFIG_YAML)
-    pipeline_cfg = config_data.setdefault("pipeline", {})
-    pipeline_cfg["custom_pub2tools_biotools_json"] = "out/positives.json"
-    pipeline_cfg["resume_from_pub2tools"] = True
-    pipeline_cfg["resume_from_enriched"] = False
-    pipeline_cfg["resume_from_scoring"] = False
-
-    config_path = Path(tmp_path) / "config.yaml"
-    config_path.write_text(
-        yaml.safe_dump(config_data, sort_keys=False), encoding="utf-8"
-    )
-
-    runner = CliRunner()
-    result = runner.invoke(app, ["--config", str(config_path)])
-
-    assert result.exit_code == 2
-    output = result.output or ""
-    output = click.utils.strip_ansi(output)
-    assert "Invalid value for --resume-from-pub2tools" in output
-    assert "pipeline.custom_pub2tools_biotools_json" in output
-    assert "Traceback" not in output
+# Test file kept for future CLI validation tests.
+# Previous test_conflicting_resume_and_input_exits_with_message was removed
+# because resume_from_pub2tools and custom_pub2tools_biotools_json are now
+# allowed to work together (custom file is treated as the pub2tools export).

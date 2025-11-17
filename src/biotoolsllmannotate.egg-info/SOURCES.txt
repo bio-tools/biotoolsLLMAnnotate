@@ -30,6 +30,7 @@ src/biotoolsllmannotate/ingest/dedup.py
 src/biotoolsllmannotate/ingest/pub2tools_client.py
 src/biotoolsllmannotate/ingest/pub2tools_fetcher.py
 src/biotoolsllmannotate/io/__init__.py
+src/biotoolsllmannotate/io/biotools_api.py
 src/biotoolsllmannotate/io/logging.py
 src/biotoolsllmannotate/io/payload_writer.py
 src/biotoolsllmannotate/io/report_writer.py

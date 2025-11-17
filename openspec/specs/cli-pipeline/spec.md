@@ -12,21 +12,28 @@ The CLI pipeline SHALL execute the gather, deduplicate, enrich, score, and outpu
 - **AND** the status renderer tracks progress for each stage until completion
 
 ### Requirement: Candidate Ingestion Order
-The pipeline SHALL source candidates in the following priority: (1) resume from an enriched cache when requested and available, (2) reuse Pub2Tools exports or explicit custom input files, and (3) invoke the Pub2Tools CLI when no local input is available and the run is not offline.
+The pipeline SHALL source candidates in the following priority: (1) resume from an enriched cache when requested and available, (2) reuse Pub2Tools exports from the canonical `out/pub2tools/range_<from>_to_<to>/` folder OR explicit custom input files, and (3) invoke the Pub2Tools CLI when no local input is available and the run is not offline.
 
-#### Scenario: Resume from enriched cache succeeds
-- **WHEN** `--resume-from-enriched` is set and the cache file exists
-- **THEN** the pipeline reloads candidates from the cache and skips fetching from other sources
+**Changes from original**:
+- Added reference to canonical Pub2Tools folder (`out/pub2tools/range_<from>_to_<to>/`)
+- Clarified that resume search includes both pipeline-specific cache (`out/range_*/pub2tools/`) and global Pub2Tools cache
 
-#### Scenario: Custom input file is loaded
+#### Scenario: Custom input file is loaded (unchanged)
 - **WHEN** `pipeline.custom_pub2tools_biotools_json` is set to a valid file path
 - **THEN** the pipeline loads candidates from that file and uses `custom_tool_set` as the output directory label
 
-#### Scenario: Date-based query uses date-based folder
+#### Scenario: Date-based query uses date-based folder (unchanged)
 - **WHEN** `pipeline.custom_pub2tools_biotools_json` is null and date parameters are provided
 - **THEN** the pipeline uses `out/range_YYYY-MM-DD_to_YYYY-MM-DD/` as the output directory label regardless of resume flags
 
-#### Scenario: Offline run skips Pub2Tools fetch
+#### Scenario: Resume finds canonical Pub2Tools cache (new)
+- **GIVEN** `out/pub2tools/range_2025-01-01_to_2025-01-15/to_biotools.json` exists
+- **AND** `out/range_2025-01-01_to_2025-01-15/pub2tools/to_biotools.json` does NOT exist
+- **WHEN** the pipeline runs with `--resume-from-pub2tools` and matching date range
+- **THEN** the pipeline searches `out/pub2tools/range_2025-01-01_to_2025-01-15/` as a fallback location
+- **AND** successfully loads candidates without invoking the Pub2Tools CLI
+
+#### Scenario: Offline run skips Pub2Tools fetch (unchanged)
 - **WHEN** no local input exists and `offline=True`
 - **THEN** the pipeline SHALL NOT call the Pub2Tools CLI and proceeds with an empty candidate list
 
@@ -161,4 +168,100 @@ The pipeline configuration SHALL accept `pipeline.custom_pub2tools_biotools_json
 #### Scenario: Legacy parameter shows deprecation warning
 - **WHEN** config contains `pipeline.input_path: "file.json"` instead of the new parameter name
 - **THEN** the system logs a deprecation warning suggesting migration to `pipeline.custom_pub2tools_biotools_json`
+
+### Requirement: Canonical Pub2Tools Output Folders
+The Pub2Tools CLI wrapper SHALL write outputs to a canonical folder named `out/pub2tools/range_<from_date>_to_<to_date>` derived solely from the date range parameters, WITHOUT appending timestamp suffixes, and SHALL reuse this folder for all invocations with identical date ranges; existing outputs SHALL be overwritten on subsequent runs.
+
+#### Scenario: First run creates canonical folder
+- **GIVEN** no existing Pub2Tools output for the date range `2025-01-01` to `2025-01-15`
+- **WHEN** `fetch_candidates_all` is invoked with `since="2025-01-01"` and `to_date="2025-01-15"`
+- **THEN** the wrapper creates `out/pub2tools/range_2025-01-01_to_2025-01-15/`
+- **AND** the Pub2Tools CLI writes `to_biotools.json` and intermediate files to that folder
+- **AND** no timestamp suffix appears in the folder name
+
+#### Scenario: Second run reuses canonical folder
+- **GIVEN** existing folder `out/pub2tools/range_2025-01-01_to_2025-01-15/` with `to_biotools.json` from a previous run
+- **WHEN** `fetch_candidates_all` is invoked again with the same date range
+- **THEN** the wrapper reuses `out/pub2tools/range_2025-01-01_to_2025-01-15/`
+- **AND** deletes the existing `to_biotools.json` before invoking the Pub2Tools CLI
+- **AND** the Pub2Tools CLI overwrites all output files in the folder
+- **AND** the folder modification timestamp reflects the second run
+
+#### Scenario: Different date ranges create different folders
+- **GIVEN** existing folder `out/pub2tools/range_2025-01-01_to_2025-01-15/`
+- **WHEN** `fetch_candidates_all` is invoked with `since="2025-02-01"` and `to_date="2025-02-15"`
+- **THEN** the wrapper creates a new folder `out/pub2tools/range_2025-02-01_to_2025-02-15/`
+- **AND** the existing folder remains untouched
+
+#### Scenario: Resume from cached Pub2Tools output
+- **GIVEN** existing folder `out/pub2tools/range_2025-01-01_to_2025-01-15/to_biotools.json`
+- **AND** no cached export in the main pipeline folder `out/range_2025-01-01_to_2025-01-15/pub2tools/`
+- **WHEN** the pipeline executes with `--resume-from-pub2tools` and the same date range
+- **THEN** the resume search paths include `out/pub2tools/range_2025-01-01_to_2025-01-15/`
+- **AND** the pipeline successfully loads candidates from the cached `to_biotools.json`
+- **AND** no new Pub2Tools CLI invocation occurs
+
+#### Scenario: Legacy timestamped folders are ignored
+- **GIVEN** existing timestamped folders from old runs (e.g., `out/pub2tools/range_2025-01-01_to_2025-01-15_20251111T162353Z/`)
+- **WHEN** `fetch_candidates_all` is invoked with `since="2025-01-01"` and `to_date="2025-01-15"`
+- **THEN** the wrapper creates or reuses the canonical folder `out/pub2tools/range_2025-01-01_to_2025-01-15/`
+- **AND** the legacy timestamped folders are left untouched for manual cleanup
+
+### Requirement: Live bio.tools API Validation
+The pipeline SHALL support an optional step, after scoring and registry membership checks, to validate each payload entry against the live bio.tools API or development server. The validation endpoint SHALL be configurable via the `biotools_validate_api_base` configuration field (defaulting to `https://bio.tools/api/tool/validate/`). When a `.bt_token` file exists in the repository root, the pipeline SHALL read the token and include an `Authorization: Token {token}` header in validation requests to support authenticated dev server access. The pipeline SHALL fall back to local Pydantic validation when the token file is missing, authentication fails (401/403), or the API is unreachable.
+
+#### Scenario: Payload entry validated against dev server with token
+- **GIVEN** a `.bt_token` file exists in the repository root
+- **AND** `biotools_validate_api_base` is set to `https://bio-tools-dev.sdu.dk/api/tool/validate/`
+- **WHEN** validation is enabled and the pipeline validates an entry
+- **THEN** the validation request includes an `Authorization: Token {token}` header
+- **AND** the dev server returns validation results
+- **AND** the pipeline logs successful API validation
+
+#### Scenario: Payload entry validated against production API with token
+- **GIVEN** a `.bt_token` file exists in the repository root
+- **AND** `biotools_validate_api_base` is set to `https://bio.tools/api/tool/validate/` (default)
+- **WHEN** validation is enabled and the pipeline validates an entry
+- **THEN** the validation request includes an `Authorization: Token {token}` header
+- **AND** the pipeline logs validation results
+
+#### Scenario: Token file missing falls back to local validation
+- **GIVEN** no `.bt_token` file exists
+- **WHEN** validation is enabled and `use_api=True`
+- **THEN** the pipeline logs that token is missing
+- **AND** falls back to local Pydantic validation
+- **AND** all entries are validated against the local schema
+
+#### Scenario: Authentication failure falls back to local validation
+- **GIVEN** a `.bt_token` file exists but contains an invalid token
+- **WHEN** validation is enabled and the API returns 401 or 403
+- **THEN** the pipeline logs the authentication error
+- **AND** automatically falls back to local Pydantic validation
+- **AND** the entry is validated successfully using the local schema
+
+#### Scenario: Payload entry matches live bio.tools record
+- **GIVEN** a payload entry with a valid bio.tools ID
+- **WHEN** live validation is enabled
+- **AND** the pipeline queries the bio.tools API for that ID
+- **THEN** the API returns a matching record
+- **AND** the pipeline logs successful validation
+
+#### Scenario: Payload entry missing in live bio.tools
+- **GIVEN** a payload entry with a bio.tools ID not present in the live registry
+- **WHEN** live validation is enabled
+- **AND** the pipeline queries the bio.tools API for that ID
+- **THEN** the API returns a 404 or error
+- **AND** the pipeline logs a warning and flags the entry for review
+
+#### Scenario: API validation disabled
+- **GIVEN** the validation feature is disabled by config or CLI flag
+- **WHEN** the pipeline runs
+- **THEN** no live API queries are made
+- **AND** the pipeline proceeds as before
+
+#### Scenario: API/network error
+- **GIVEN** a network or API error occurs during validation
+- **WHEN** the pipeline queries the API
+- **THEN** the error is logged
+- **AND** the pipeline continues processing other entries
 

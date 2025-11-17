@@ -159,6 +159,38 @@ def normalize_url(u: str) -> str:
     return u
 
 
+def generate_biotools_id(tool_name: str) -> str:
+    """Generate a bio.tools-compatible ID from a tool name.
+
+    Converts to lowercase, replaces spaces and special chars with hyphens/underscores,
+    and removes consecutive separators.
+
+    Examples:
+        "DeepRank-GNN-esm" -> "deeprank-gnn-esm"
+        "ARCTIC-3D" -> "arctic-3d"
+        "My Tool Name" -> "my_tool_name"
+    """
+    if not tool_name:
+        return ""
+
+    # Convert to lowercase
+    id_str = tool_name.lower()
+
+    # Replace spaces with underscores
+    id_str = id_str.replace(" ", "_")
+
+    # Keep only alphanumeric, hyphens, and underscores
+    id_str = re.sub(r"[^a-z0-9_-]", "", id_str)
+
+    # Remove consecutive separators
+    id_str = re.sub(r"[-_]+", lambda m: m.group(0)[0], id_str)
+
+    # Remove leading/trailing separators
+    id_str = id_str.strip("-_")
+
+    return id_str
+
+
 def primary_homepage(urls: Iterable[str]) -> str | None:
     for u in urls:
         nu = normalize_url(str(u))
@@ -401,6 +433,10 @@ def write_report_csv(path: Path, rows: Iterable[dict[str, Any]]) -> None:
         "rationale",
         "model",
         "origin_types",
+        "biotools_api_status",
+        "api_name",
+        "api_status",
+        "api_description",
     ]
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -467,6 +503,10 @@ def write_report_csv(path: Path, rows: Iterable[dict[str, Any]]) -> None:
                     "rationale": scores.get("rationale", ""),
                     "model": scores.get("model", ""),
                     "origin_types": origin_types_str,
+                    "biotools_api_status": row.get("biotools_api_status", ""),
+                    "api_name": row.get("api_name", ""),
+                    "api_status": row.get("api_status", ""),
+                    "api_description": row.get("api_description", ""),
                 }
             )
 
@@ -539,10 +579,10 @@ def classify_candidate(
     review_bio, add_bio = bio_thresholds
     review_doc, add_doc = doc_thresholds
 
-    bio_add_threshold = max(add_bio, 0.75)
-    bio_review_threshold = max(review_bio, min(bio_add_threshold, 0.6))
-    doc_add_threshold = max(add_doc, 0.40)
-    doc_review_threshold = max(review_doc, 0.30)
+    bio_add_threshold = add_bio
+    bio_review_threshold = review_bio
+    doc_add_threshold = add_doc
+    doc_review_threshold = review_doc
 
     documentation_subscores = scores.get("documentation_subscores")
     if not isinstance(documentation_subscores, dict):
@@ -617,41 +657,195 @@ def _apply_documentation_penalty(
                 doc_subscores[key] = 0.0
 
 
-def to_entry(c: dict[str, Any], homepage: str | None) -> dict[str, Any]:
+def to_entry(
+    c: dict[str, Any], homepage: str | None, scores: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """
+    Build bio.tools payload entry from candidate.
+
+    Preserves the original pub2tools structure (function, topic, link, etc.)
+    and updates the description field with LLM-generated content from scores.
+    """
+    # Start with a deep copy of the candidate to preserve all pub2tools fields
+    entry: dict[str, Any] = {}
+
+    # Copy all fields from candidate except those we'll explicitly override
+    for key, value in c.items():
+        if key not in (
+            "title",
+            "urls",
+            "tags",
+            "in_biotools",
+            "in_biotools_name",
+            "homepage_status",
+            "homepage_error",
+            "enrichment_context",
+        ):
+            entry[key] = value
+
+    # Ensure required fields are present
     name = c.get("title") or c.get("name") or "Unnamed Tool"
-    desc = c.get("description") or "Candidate tool from Pub2Tools"
-    homepage = homepage or ""
-    entry: dict[str, Any] = {
-        "name": str(name),
-        "description": str(desc),
-        "homepage": homepage,
-    }
-    # Documentation: match schema (list of Documentation objects)
-    docs = [u for u in (c.get("urls") or []) if "docs" in str(u).lower()]
-    if docs:
-        entry["documentation"] = [{"url": str(u), "type": ["Manual"]} for u in docs]
-    # Add tags as topic if present
-    tags = c.get("tags")
-    if tags:
-        topics: list[dict[str, str]] = []
-        for raw in tags:
-            if raw is None:
-                continue
-            if isinstance(raw, str):
-                text = raw.strip()
-            else:
-                text = str(raw).strip()
-            if not text:
-                continue
-            topics.append({"term": text, "uri": ""})
-        if topics:
-            entry["topic"] = topics
-    # Optionally add homepage as link if not present in documentation
-    if homepage and not any(
-        homepage == d.get("url") for d in entry.get("documentation", [])
-    ):
-        entry.setdefault("link", []).append({"url": homepage, "type": ["Homepage"]})
+    entry["name"] = str(name)
+
+    # Update description with LLM-generated concise_description from scores if available
+    # This is the key improvement: use the scoring output description
+    if scores and scores.get("concise_description"):
+        entry["description"] = scores["concise_description"]
+    elif "description" not in entry or not entry["description"]:
+        # Fallback to original description or generic message
+        entry["description"] = c.get("description") or "Candidate tool from Pub2Tools"
+
+    # Update homepage if provided
+    if homepage:
+        entry["homepage"] = homepage
+    elif "homepage" not in entry:
+        entry["homepage"] = ""
+
+    # Ensure biotoolsID is present
+    if "biotoolsID" not in entry:
+        biotools_id = (
+            c.get("biotoolsID")
+            or c.get("biotools_id")
+            or c.get("id")
+            or c.get("tool_id")
+            or c.get("identifier")
+        )
+        if biotools_id:
+            entry["biotoolsID"] = str(biotools_id)
+
     return entry
+
+
+def validate_biotools_payload(
+    payload: list[dict[str, Any]],
+    logger,
+    payload_type: str = "payload",
+    use_api: bool = False,
+    api_base: str = "https://bio.tools/api/tool/validate/",
+    token: str | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Validate payload entries against bio.tools schema.
+
+    Args:
+        payload: List of tool entries to validate
+        logger: Logger instance
+        payload_type: Type of payload for logging (e.g., "Add payload", "Review payload")
+        use_api: If True, use bio.tools API validation; if False, use local Pydantic validation
+        api_base: Base URL for the validation API endpoint
+        token: Optional authentication token for dev server access
+
+    Returns:
+        (valid_entries, validation_errors)
+        - valid_entries: List of entries that passed validation
+        - validation_errors: List of dicts with 'name', 'biotoolsID', and 'errors' keys
+    """
+    from pydantic import ValidationError
+    from biotoolsllmannotate.io.biotools_api import validate_biotools_entry
+
+    valid_entries = []
+    validation_errors = []
+
+    # Log which validation method is being used
+    if use_api:
+        if token:
+            logger.info(
+                f"Validating {payload_type} against bio.tools API ({api_base}) with authentication"
+            )
+        else:
+            logger.info(
+                f"Validating {payload_type} against bio.tools API ({api_base}) without token - may fall back to local validation"
+            )
+    else:
+        logger.info(f"Validating {payload_type} using local Pydantic schema")
+
+    for entry in payload:
+        entry_name = entry.get("name", "Unknown")
+        entry_id = entry.get("biotoolsID", "")
+
+        if use_api:
+            # Use bio.tools API validation endpoint
+            logger.debug(f"Validating '{entry_name}' against bio.tools API...")
+            validation_result = validate_biotools_entry(
+                entry, api_base=api_base, token=token
+            )
+
+            if validation_result["valid"]:
+                valid_entries.append(entry)
+            else:
+                # Check for authentication errors - fall back to local validation
+                errors = validation_result.get("errors", [])
+                if any(
+                    "401" in str(err) or "Authentication" in str(err) for err in errors
+                ):
+                    logger.warning(
+                        f"bio.tools API requires authentication for '{entry_name}', falling back to local validation"
+                    )
+                    # Retry with local Pydantic validation
+                    try:
+                        BioToolsEntry(**entry)
+                        valid_entries.append(entry)
+                        logger.info(
+                            f"  ✓ {entry_name} ({entry_id}): Valid (local Pydantic)"
+                        )
+                    except ValidationError as e:
+                        error_details = []
+                        for error in e.errors():
+                            field = ".".join(str(loc) for loc in error["loc"])
+                            msg = error["msg"]
+                            error_details.append(f"{field}: {msg}")
+                        validation_errors.append(
+                            {
+                                "name": entry_name,
+                                "biotoolsID": entry_id,
+                                "errors": error_details,
+                            }
+                        )
+                else:
+                    validation_errors.append(
+                        {
+                            "name": entry_name,
+                            "biotoolsID": entry_id,
+                            "errors": validation_result["errors"],
+                            "warnings": validation_result.get("warnings", []),
+                        }
+                    )
+                    logger.warning(
+                        f"bio.tools API validation failed for '{entry_name}' (ID: {entry_id}): {len(validation_result['errors'])} errors"
+                    )
+        else:
+            # Use local Pydantic validation
+            try:
+                BioToolsEntry(**entry)
+                valid_entries.append(entry)
+            except ValidationError as e:
+                error_details = []
+                for error in e.errors():
+                    field = ".".join(str(loc) for loc in error["loc"])
+                    msg = error["msg"]
+                    error_details.append(f"{field}: {msg}")
+
+                validation_errors.append(
+                    {
+                        "name": entry_name,
+                        "biotoolsID": entry_id,
+                        "errors": error_details,
+                    }
+                )
+                logger.warning(
+                    f"Local schema validation failed for '{entry_name}' (ID: {entry_id}): {len(error_details)} errors"
+                )
+
+    validation_method = "bio.tools API" if use_api else "local Pydantic"
+    if validation_errors:
+        logger.warning(
+            f"❌ {payload_type}: {len(validation_errors)}/{len(payload)} entries failed {validation_method} validation"
+        )
+    else:
+        logger.info(
+            f"✅ {payload_type}: All {len(payload)} entries passed {validation_method} validation"
+        )
+
+    return valid_entries, validation_errors
 
 
 def _publication_identifiers(candidate: dict[str, Any]) -> list[str]:
@@ -946,7 +1140,8 @@ def _ensure_homepage_link(links: Any, homepage: str) -> list[dict[str, Any]] | N
     if not any(
         isinstance(entry, dict) and entry.get("url") == homepage for entry in normalized
     ):
-        normalized.append({"url": homepage, "type": ["Homepage"]})
+        # Skip adding homepage link for dev API compatibility (see above comment).
+        pass
     return normalized
 
 
@@ -1153,6 +1348,9 @@ def execute_run(
     resume_from_scoring: bool = False,
     config_file_path: Path | None = None,
     output_root: Path | None = None,
+    validate_biotools_api: bool = False,
+    biotools_api_base: str = "https://bio.tools/api/tool/",
+    biotools_validate_api_base: str = "https://bio.tools/api/tool/validate/",
 ) -> None:
     from biotoolsllmannotate.io.logging import get_logger, setup_logging
 
@@ -1412,12 +1610,24 @@ def execute_run(
                             report,
                             len(cached_assessment_rows),
                         )
+                        # When resuming from scoring, also use the enriched cache to avoid re-scraping/re-enriching
+                        if enriched_cache and enriched_cache.exists():
+                            logger.info(
+                                "Automatically enabling --resume-from-enriched to skip re-enrichment"
+                            )
+                            resume_from_enriched = True
                     else:
                         logger.warning(
                             "--resume-from-scoring requested but cached assessment %s contained no rows; rerunning scoring",
                             report,
                         )
                         cached_assessment_rows = None
+                        # Fall back to enriched cache if available to avoid re-fetching from pub2tools
+                        if enriched_cache and enriched_cache.exists():
+                            logger.info(
+                                "Automatically enabling --resume-from-enriched to use cached candidates"
+                            )
+                            resume_from_enriched = True
                 except Exception as exc:
                     logger.warning(
                         "Failed to read cached assessment %s: %s; rerunning scoring",
@@ -1425,11 +1635,23 @@ def execute_run(
                         exc,
                     )
                     cached_assessment_rows = None
+                    # Fall back to enriched cache if available to avoid re-fetching from pub2tools
+                    if enriched_cache and enriched_cache.exists():
+                        logger.info(
+                            "Automatically enabling --resume-from-enriched to use cached candidates"
+                        )
+                        resume_from_enriched = True
             else:
                 logger.warning(
                     "--resume-from-scoring requested but assessment report not found: %s",
                     report,
                 )
+                # Fall back to enriched cache if available to avoid re-fetching from pub2tools
+                if enriched_cache and enriched_cache.exists():
+                    logger.info(
+                        "Automatically enabling --resume-from-enriched to use cached candidates"
+                    )
+                    resume_from_enriched = True
 
         time_period_root.mkdir(parents=True, exist_ok=True)
         for folder in ("exports", "reports", "cache", "logs", "pub2tools", "ollama"):
@@ -1621,7 +1843,7 @@ def execute_run(
                 )
             else:
                 set_status(0, "GATHER – no local input, Pub2Tools may run")
-            if not candidates and not offline:
+            if not candidates and not offline and not has_explicit_input:
                 try:
                     from ..ingest import pub2tools_client as p2t_client
 
@@ -1631,38 +1853,24 @@ def execute_run(
                         (fetch_to_dt.date() if fetch_to_dt else "now"),
                     )
                     set_status(0, "GATHER – invoking Pub2Tools fetch")
+                    pub2tools_output_dir = time_period_root / "pub2tools"
                     candidates = p2t_client.fetch_via_cli(
                         fetch_from_dt,
                         to_date=fetch_to_dt,
                         limit=limit,
                         cli_path=p2t_cli,
+                        output_dir=pub2tools_output_dir,
                         edam_owl=edam_owl or "http://edamontology.org/EDAM.owl",
                         idf=idf
                         or "https://github.com/edamontology/edammap/raw/master/doc/biotools.idf",
                         idf_stemmed=idf_stemmed
                         or "https://github.com/edamontology/edammap/raw/master/doc/biotools.stemmed.idf",
                     )
-                    latest_export = _find_latest_pub2tools_export(Path("out/pub2tools"))
-                    if latest_export:
-                        target_dir = time_period_root / "pub2tools"
-                        target_dir.mkdir(parents=True, exist_ok=True)
-                        target_path = target_dir / "to_biotools.json"
-                        try:
-                            shutil.copy2(latest_export, target_path)
-                            logger.info(
-                                "FETCH cached Pub2Tools export -> %s",
-                                target_path,
-                            )
-                        except Exception as copy_exc:
-                            logger.warning(
-                                "Failed to copy Pub2Tools export from %s to %s: %s",
-                                latest_export,
-                                target_path,
-                                copy_exc,
-                            )
-                    else:
-                        logger.warning(
-                            "FETCH completed but no to_biotools.json found under out/pub2tools"
+                    if candidates:
+                        logger.info(
+                            "FETCH pub2tools wrote %d candidates to %s",
+                            len(candidates),
+                            pub2tools_output_dir / "to_biotools.json",
                         )
                     logger.info(
                         "FETCH complete – %d candidates retrieved from Pub2Tools",
@@ -1691,10 +1899,6 @@ def execute_run(
             registry_search_roots.append(resume_export_path.parent)
         if env_input:
             registry_search_roots.append(Path(env_input).parent)
-        # Also search canonical global pub2tools cache (e.g., out/pub2tools/range_2025-01-01_to_2025-01-15/)
-        global_pub2tools_cache = Path("out/pub2tools") / time_period_label
-        if global_pub2tools_cache not in registry_search_roots:
-            registry_search_roots.append(global_pub2tools_cache)
 
         registry_candidates.extend(registry_search_roots)
 
@@ -1960,15 +2164,32 @@ def execute_run(
                     report_rows.append(row)
                     continue
 
+                # Generate biotoolsID if missing
+                if candidate and not (
+                    candidate.get("biotoolsID")
+                    or candidate.get("biotools_id")
+                    or candidate.get("id")
+                ):
+                    tool_name = (
+                        candidate.get("title")
+                        or candidate.get("name")
+                        or row.get("title")
+                    )
+                    if tool_name:
+                        generated_id = generate_biotools_id(tool_name)
+                        if generated_id:
+                            candidate["biotoolsID"] = generated_id
+                            row["id"] = generated_id
+
                 row["in_biotools"] = candidate.get("in_biotools")
                 row["in_biotools_name"] = candidate.get("in_biotools_name")
                 report_rows.append(row)
 
                 if decision_value == "add":
-                    payload_add.append(to_entry(candidate, homepage))
+                    payload_add.append(to_entry(candidate, homepage, scores))
                     add_records.append((candidate, scores, homepage))
                 elif decision_value == "review":
-                    payload_review.append(to_entry(candidate, homepage))
+                    payload_review.append(to_entry(candidate, homepage, scores))
 
             total_scored = len(report_rows)
             add_count = len(payload_add)
@@ -2011,15 +2232,33 @@ def execute_run(
                     doc_thresholds=doc_thresholds,
                     has_homepage=homepage_ok,
                 )
+
+                # Get or generate biotoolsID
+                tool_id = (
+                    candidate.get("id")
+                    or candidate.get("tool_id")
+                    or candidate.get("biotools_id")
+                    or candidate.get("biotoolsID")
+                    or candidate.get("identifier")
+                )
+
+                # If no ID exists, generate one from the tool name
+                if not tool_id:
+                    tool_name = (
+                        candidate.get("title")
+                        or candidate.get("name")
+                        or candidate.get("tool_title")
+                        or candidate.get("display_title")
+                    )
+                    if tool_name:
+                        generated_id = generate_biotools_id(tool_name)
+                        if generated_id:
+                            tool_id = generated_id
+                            # Store in candidate for use in payload
+                            candidate["biotoolsID"] = generated_id
+
                 decision_row = {
-                    "id": str(
-                        candidate.get("id")
-                        or candidate.get("tool_id")
-                        or candidate.get("biotools_id")
-                        or candidate.get("biotoolsID")
-                        or candidate.get("identifier")
-                        or ""
-                    ),
+                    "id": str(tool_id or ""),
                     "title": str(
                         candidate.get("title")
                         or candidate.get("name")
@@ -2208,10 +2447,10 @@ def execute_run(
                                     doc_display,
                                 )
                             if decision_value == "add":
-                                payload_add.append(to_entry(cand, homepage))
+                                payload_add.append(to_entry(cand, homepage, scores))
                                 add_records.append((cand, scores, homepage))
                             elif decision_value == "review":
-                                payload_review.append(to_entry(cand, homepage))
+                                payload_review.append(to_entry(cand, homepage, scores))
                             update_progress(3, processed, total_candidates)
                             if (
                                 processed % update_interval == 0
@@ -2247,6 +2486,52 @@ def execute_run(
                 clear_progress=True,
             )
 
+        # --- bio.tools API validation step ---
+        if validate_biotools_api:
+            from biotoolsllmannotate.io.biotools_api import (
+                fetch_biotools_entry,
+                read_biotools_token,
+            )
+
+            bt_token = read_biotools_token()
+            if bt_token:
+                logger.info("Using bio.tools authentication token for API queries")
+
+            logger.info("Validating payload entries against live bio.tools API...")
+            for row in report_rows:
+                tool_id = row.get("id") or row.get("biotools_id")
+
+                # If no ID exists, try to generate one from the tool name
+                if not tool_id:
+                    tool_name = row.get("title") or row.get("name")
+                    if tool_name:
+                        generated_id = generate_biotools_id(tool_name)
+                        if generated_id:
+                            tool_id = generated_id
+                            # Store the generated ID in the row for future use
+                            row["id"] = generated_id
+                            logger.debug(
+                                f"Generated biotoolsID '{generated_id}' from tool name '{tool_name}'"
+                            )
+
+                if not tool_id:
+                    row["biotools_api_status"] = "no_id"
+                    continue
+
+                try:
+                    api_entry = fetch_biotools_entry(
+                        tool_id, api_base=biotools_api_base, token=bt_token
+                    )
+                    if api_entry is None:
+                        row["biotools_api_status"] = "not_found"
+                    else:
+                        row["biotools_api_status"] = "ok"
+                        # Add prominent details for CSV
+                        row["api_name"] = api_entry.get("name", "")
+                        row["api_status"] = api_entry.get("status", "")
+                        row["api_description"] = api_entry.get("description", "")
+                except Exception as exc:
+                    row["biotools_api_status"] = f"error: {exc}"
         logger.info(step_msg(5, "OUTPUT – Write reports and bio.tools payload"))
         set_status(4, "OUTPUT – writing reports")
         logger.info(f"📝 Writing report to {report}")
@@ -2258,15 +2543,49 @@ def execute_run(
         payload_add = [_strip_null_fields(entry) for entry in payload_add]
         payload_review = [_strip_null_fields(entry) for entry in payload_review]
 
-        invalids = []
-        for category, entries in (("add", payload_add), ("review", payload_review)):
-            for entry in entries:
-                try:
-                    BioToolsEntry(**entry)
-                except Exception as e:
-                    invalids.append(
-                        {"entry": entry, "error": str(e), "category": category}
-                    )
+        # Validate payloads against bio.tools schema
+        # Validate payloads against bio.tools schema
+        # Read authentication token if available
+        from biotoolsllmannotate.io.biotools_api import read_biotools_token
+
+        bt_token = read_biotools_token()
+
+        if bt_token:
+            logger.info(f"✓ Found bio.tools authentication token")
+        else:
+            logger.info(
+                "ℹ No .bt_token file found, will use local validation or unauthenticated API"
+            )
+
+        # Use API validation if token is available, otherwise fall back to local
+        use_api_validation = validate_biotools_api and bt_token is not None
+
+        payload_add_valid, add_errors = validate_biotools_payload(
+            payload_add,
+            logger,
+            "Add payload",
+            use_api=use_api_validation,
+            api_base=biotools_validate_api_base,
+            token=bt_token,
+        )
+        payload_review_valid, review_errors = validate_biotools_payload(
+            payload_review,
+            logger,
+            "Review payload",
+            use_api=use_api_validation,
+            api_base=biotools_validate_api_base,
+            token=bt_token,
+        )
+        if add_errors or review_errors:
+            validation_report = output.parent / "schema_validation_errors.jsonl"
+            logger.info(f"📝 Writing schema validation errors to {validation_report}")
+            with validation_report.open("w", encoding="utf-8") as f:
+                for error in add_errors:
+                    error["payload_type"] = "add"
+                    f.write(json.dumps(error) + "\n")
+                for error in review_errors:
+                    error["payload_type"] = "review"
+                    f.write(json.dumps(error) + "\n")
 
         if not dry_run:
             if "payload" in output.stem:
@@ -2275,11 +2594,15 @@ def execute_run(
                 review_stem = f"{output.stem}_review"
             output_review = output.with_name(f"{review_stem}{output.suffix}")
 
-            logger.info(f"OUTPUT add payload -> {output}")
+            logger.info(
+                f"OUTPUT add payload -> {output} ({len(payload_add_valid)}/{len(payload_add)} valid)"
+            )
             set_status(4, "OUTPUT – writing payloads")
-            write_json(output, payload_add)
-            logger.info(f"OUTPUT review payload -> {output_review}")
-            write_json(output_review, payload_review)
+            write_json(output, payload_add_valid)
+            logger.info(
+                f"OUTPUT review payload -> {output_review} ({len(payload_review_valid)}/{len(payload_review)} valid)"
+            )
+            write_json(output_review, payload_review_valid)
 
             updated_path = updated_entries or output.with_name("biotools_entries.json")
             write_updated_entries(
@@ -2290,14 +2613,6 @@ def execute_run(
             )
         else:
             set_status(4, "OUTPUT – dry-run (payloads skipped)")
-
-        if invalids:
-            logger.error(
-                f"Payload validation failed for {len(invalids)} entries. See report for details."
-            )
-            write_json(output.with_suffix(".invalid.json"), invalids)
-            set_status(4, "OUTPUT – validation failed, see *.invalid.json")
-            sys.exit(2)
 
         logger.info("🎉 Pipeline run complete!")
         set_status(4, "OUTPUT – complete")

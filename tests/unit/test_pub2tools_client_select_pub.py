@@ -40,8 +40,7 @@ def test_fetch_via_cli_select_pub(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "--from" in cmd
     assert "--to" in cmd
     out_dir_arg = Path(cmd[2])
-    assert out_dir_arg.parent == Path("out/pub2tools")
+    # Now outputs go directly to out/range_.../pub2tools/
+    assert out_dir_arg.name == "pub2tools"
     expected_prefix = f"range_{from_date}_to_"
-    assert out_dir_arg.name.startswith(expected_prefix)
-    # Unique suffix appended after the range for disambiguation
-    assert len(out_dir_arg.name) > len(expected_prefix)
+    assert out_dir_arg.parent.name.startswith(expected_prefix)

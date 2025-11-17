@@ -42,7 +42,7 @@ The Pub2Tools CLI wrapper SHALL write outputs to a canonical folder named `out/p
 
 ## MODIFIED Requirements
 
-### Requirement: Candidate Ingestion Order (Modified)
+### Requirement: Candidate Ingestion Order
 The pipeline SHALL source candidates in the following priority: (1) resume from an enriched cache when requested and available, (2) reuse Pub2Tools exports from the canonical `out/pub2tools/range_<from>_to_<to>/` folder OR explicit custom input files, and (3) invoke the Pub2Tools CLI when no local input is available and the run is not offline.
 
 **Changes from original**:

@@ -9,3 +9,7 @@ out/
 build/
 dist/
 *.egg-info/
+
+# token for bio.tools
+.bt_token
+

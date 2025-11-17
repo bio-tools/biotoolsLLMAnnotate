@@ -42,7 +42,7 @@ biotools-annotate --write-default-config
 
 ### Pub2Tools Configuration
 
-> **Folder Behavior**: When the Pub2Tools CLI is invoked, outputs are cached in `out/pub2tools/range_<from>_to_<to>/` based on the date parameters. This canonical folder is reused across runs with identical date ranges, with existing outputs overwritten. These intermediate files are ephemeral—the main pipeline preserves full run history in `out/range_*/` folders.
+> **Folder Behavior**: When the Pub2Tools CLI is invoked, outputs are written directly to `out/range_<from>_to_<to>/pub2tools/` within each run's folder. Existing outputs are overwritten on subsequent runs with the same date range.
 
 #### `pub2tools.edam_owl`
 - **Type**: String (URL)
@@ -142,6 +142,12 @@ biotools-annotate --write-default-config
 - **Default**: `false`
 - **Description**: When `true`, the pipeline reuses the cached `reports/assessment.jsonl` for the time-period folder, reapplies the current score thresholds, and regenerates payload outputs without invoking the LLM scorer again. Requires the enriched candidates cache to be present (automatically handled when `pipeline.resume_from_enriched` is also `true`).
 - **CLI equivalent**: `--resume-from-scoring`
+
+#### `pipeline.validate_biotools_api`
+- **Type**: Boolean
+- **Default**: `false`
+- **Description**: When `true`, the pipeline validates each payload entry against the live bio.tools API after scoring and registry checks. The validation adds `biotools_api_status`, `api_name`, and `api_description` columns to the CSV output. Use this to verify that tools marked as present in bio.tools actually exist in the live registry and to detect discrepancies with local snapshots. Disabled by default to avoid unnecessary API load during batch runs or offline mode.
+- **CLI equivalent**: `--validate-biotools-api` / `--no-validate-biotools-api`
 
 #### `pipeline.min_bio_score`
 - **Type**: Float (0.0–1.0)

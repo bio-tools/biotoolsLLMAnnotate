@@ -20,6 +20,7 @@ CLI tools for discovering, enriching, and annotating bio.tools entries with help
 - Fetch candidate records from Pub2Tools exports or existing JSON files.
 - Enrich candidates with homepage metadata, documentation links, repositories, and publication context.
 - Score bioinformatics relevance and documentation quality using an Ollama model.
+- Generate optimized, concise descriptions through LLM scoring while preserving EDAM annotations.
 - Produce strict biotoolsSchema payloads plus human-readable assessment reports.
 - Resume any stage (gather, enrich, score) using cached artifacts to accelerate iteration.
 
@@ -55,7 +56,7 @@ biotoolsannotate --resume-from-enriched --resume-from-scoring --dry-run
 ## Configuration
 Configuration is YAML-driven. The CLI loads `config.yaml` from the project root by default and falls back to internal defaults when absent. All placeholders marked `__VERSION__` resolve to the installed package version at runtime. 
 
-During each run the pipeline scans the Pub2Tools export folders (for example `pub2tools/to_biotools.json` or `pub2tools/biotools_entries.json`) and uses them to flag candidates already present in bio.tools. When the Pub2Tools CLI is invoked, outputs are cached in `out/pub2tools/range_<from>_to_<to>/` and reused across runs with identical date parameters. You can also point to any standalone registry snapshot via `pipeline.registry_path` or `--registry` when you want to bypass Pub2Tools exports entirely.
+During each run the pipeline scans the Pub2Tools export folders (for example `pub2tools/to_biotools.json` or `pub2tools/biotools_entries.json`) and uses them to flag candidates already present in bio.tools. When the Pub2Tools CLI is invoked, outputs are written directly to `out/range_<from>_to_<to>/pub2tools/`. You can also point to any standalone registry snapshot via `pipeline.registry_path` or `--registry` when you want to bypass Pub2Tools exports entirely.
 
 ### Core settings
 | Purpose | Config key | CLI flag | Notes |
@@ -64,6 +65,7 @@ During each run the pipeline scans the Pub2Tools export folders (for example `pu
 | Registry snapshot | `pipeline.registry_path` | `--registry PATH` | Supply an external bio.tools JSON/JSONL snapshot for membership checks |
 | Date range | `pipeline.from_date`, `pipeline.to_date` | `--from-date`, `--to-date` | Accepts relative windows like `7d` or ISO dates |
 | Thresholds | `pipeline.min_bio_score`, `pipeline.min_documentation_score` | `--min-bio-score`, `--min-doc-score` | Set both via legacy `--min-score` if desired |
+| bio.tools API validation | `pipeline.validate_biotools_api` | `--validate-biotools-api` | Validate payload entries against live bio.tools API after scoring (default: `false`). See [bio.tools API Validation Setup](#biotools-api-validation-setup) below. |
 | Offline mode | `pipeline.offline` | `--offline` | Disables homepage scraping and Europe PMC enrichment |
 | Ollama model | `ollama.model` | `--model` | Defaults to `llama3.2`; override per run |
 | LLM temperature | `ollama.temperature` | (config only) | Lower values tighten determinism; default is `0.01` for high-precision scoring |
@@ -91,6 +93,31 @@ biotoolsannotate --config myconfig.yaml
 
 Use `biotoolsannotate --help` to explore all available flags, including concurrency settings, progress display, and resume options.
 
+## bio.tools API Validation Setup
+
+To enable live validation of generated payloads against the bio.tools schema:
+
+1. **Obtain a token** from the bio.tools team for the development server.
+2. **Create `.bt_token` file** in the repository root:
+   ```bash
+   echo "your-dev-token" > .bt_token
+   ```
+3. **Configure dev endpoints** in your config file (e.g., `myconfig.yaml`):
+   ```yaml
+   pipeline:
+     validate_biotools_api: true
+     biotools_api_base: "https://bio-tools-dev.sdu.dk/api/tool/"
+     biotools_validate_api_base: "https://bio-tools-dev.sdu.dk/api/tool/validate/"
+   ```
+4. **Run the pipeline**:
+   ```bash
+   biotoolsannotate --config myconfig.yaml
+   ```
+
+Look for `✓ Found bio.tools authentication token` in the console output. If no token is present, the pipeline falls back to local Pydantic validation automatically.
+
+For detailed setup, troubleshooting, and current limitations, see [`docs/BIOTOOLS_API_VALIDATION.md`](docs/BIOTOOLS_API_VALIDATION.md).
+
 ## Generated Outputs
 Each run writes artifacts to one of the following folders:
 
@@ -104,7 +131,7 @@ The selected folder contains:
 | `exports/biotools_payload.json` | biotoolsSchema-compliant payload ready for upload |
 | `exports/biotools_entries.json` | Full entries including enriched metadata |
 | `reports/assessment.jsonl` | Line-delimited scoring results (bio score, doc score, rationale) |
-| `reports/assessment.csv` | Spreadsheet-friendly summary of the JSONL file (includes `in_biotools` and `confidence_score` columns when Pub2Tools snapshots are present) |
+| `reports/assessment.csv` | Spreadsheet-friendly summary of the JSONL file (includes `in_biotools` and `confidence_score` columns when Pub2Tools snapshots are present; adds `biotools_api_status`, `api_name`, and `api_description` when `--validate-biotools-api` is enabled) |
 | `cache/enriched_candidates.json.gz` | Cached candidates after enrichment for quick resumes |
 | `logs/ollama/ollama.log` | Human-readable append-only log of every LLM request and response |
 | `ollama/trace.jsonl` | Machine-readable trace with prompt variants, options, statuses, and parsed JSON payloads |

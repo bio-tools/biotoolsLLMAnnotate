@@ -198,6 +198,7 @@ def fetch_via_cli(
     *,
     limit: int | None = None,
     cli_path: str | None = None,
+    output_dir: Path | None = None,
     edam_owl: str = "http://edamontology.org/EDAM.owl",
     idf: str = "https://github.com/edamontology/edammap/raw/master/doc/biotools.idf",
     idf_stemmed: str = "https://github.com/edamontology/edammap/raw/master/doc/biotools.stemmed.idf",
@@ -205,10 +206,9 @@ def fetch_via_cli(
     """Invoke a Pub2Tools CLI to fetch recent candidates as JSON.
 
     This uses the -all command with --from and --to to run the full pipeline.
-    
-    Outputs are written to out/pub2tools/range_<from>_to_<to>/ and reused
-    across runs with identical date parameters. Existing outputs are 
-    overwritten on subsequent runs.
+
+    Outputs are written to the specified output_dir (or out/range_.../pub2tools/
+    if not specified). Existing outputs are overwritten on subsequent runs.
 
     If no CLI is found or the invocation fails, returns an empty list.
     """
@@ -233,11 +233,11 @@ def fetch_via_cli(
         _iso_utc(to_date)[:10] if to_date else _iso_utc(datetime.now(UTC))[:10]
     )
 
-    # Use canonical folder per date range (reused across runs with same parameters)
-    # This eliminates timestamped folder proliferation and simplifies resume logic
-    range_prefix = f"range_{from_date}_to_{to_date_str}"
-    base_dir = Path("out/pub2tools")
-    output_dir = base_dir / range_prefix
+    # Use provided output_dir or default to out/range_.../pub2tools/
+    if output_dir is None:
+        range_prefix = f"range_{from_date}_to_{to_date_str}"
+        output_dir = Path("out") / range_prefix / "pub2tools"
+
     output_dir.mkdir(parents=True, exist_ok=True)
     existing_to_biotools = output_dir / "to_biotools.json"
     try:

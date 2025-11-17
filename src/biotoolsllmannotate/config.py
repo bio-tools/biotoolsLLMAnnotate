@@ -28,6 +28,7 @@ DEFAULT_CONFIG_YAML = {
         "timeout": 6000,
         "retryLimit": 0,
         "fetcher_threads": 4,
+        "validate_biotools_api": False,
     },
     "pipeline": {
         "custom_pub2tools_biotools_json": None,
@@ -38,6 +39,8 @@ DEFAULT_CONFIG_YAML = {
         "to_date": None,
         "resume_from_pub2tools": False,
         "resume_from_scoring": False,
+        "biotools_api_base": "https://bio.tools/api/tool/",
+        "biotools_validate_api_base": "https://bio.tools/api/tool/validate/",
         "bio_score_thresholds": {
             "add": 0.6,
             "review": 0.5,
