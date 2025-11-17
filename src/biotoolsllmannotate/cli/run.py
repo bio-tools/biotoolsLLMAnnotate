@@ -359,7 +359,12 @@ def ensure_parent(path: Path) -> None:
 
 def write_json(path: Path, obj: Any) -> None:
     ensure_parent(path)
-    path.write_text(json.dumps(obj, indent=2), encoding="utf-8")
+        path.write_text(json.dumps(obj, indent=2), encoding="utf-8")
+
+    def write_invalid_json(path: Path, invalid_entries: list[dict]) -> None:
+        ensure_parent(path)
+        # Write invalid entries and their errors
+        path.write_text(json.dumps(invalid_entries, indent=2), encoding="utf-8")
 
 
 def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
@@ -430,8 +435,8 @@ def write_report_csv(path: Path, rows: Iterable[dict[str, Any]]) -> None:
         "doc_B4",
         "doc_B5",
         "concise_description",
-        "rationale",
-        "model",
+            # Update description with LLM-generated concise_description from scores if available
+            # This is the key improvement: use the scoring output description
         "origin_types",
         "biotools_api_status",
         "api_name",
@@ -2571,6 +2576,21 @@ def execute_run(
             else:
                 review_stem = f"{output.stem}_review"
             output_review = output.with_name(f"{review_stem}{output.suffix}")
+
+                # Write invalid entries to biotools_invalid.json
+                invalid_path = output.with_name("biotools_invalid.json")
+                invalid_entries = []
+                for error in add_errors + review_errors:
+                    # Find the original entry by biotoolsID or name
+                    entry_id = error.get("biotoolsID")
+                    entry_name = error.get("name")
+                    # Try to find the entry in the original payloads
+                    entry = next((e for e in payload_add + payload_review if e.get("biotoolsID") == entry_id or e.get("name") == entry_name), None)
+                    if entry:
+                        invalid_entries.append({**entry, "errors": error.get("errors", []), "warnings": error.get("warnings", []), "payload_type": error.get("payload_type")})
+                    else:
+                        invalid_entries.append(error)
+                write_invalid_json(invalid_path, invalid_entries)
 
             logger.info(
                 f"OUTPUT add payload -> {output} ({len(payload_add_valid)}/{len(payload_add)} valid)"
