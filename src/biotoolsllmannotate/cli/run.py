@@ -359,12 +359,13 @@ def ensure_parent(path: Path) -> None:
 
 def write_json(path: Path, obj: Any) -> None:
     ensure_parent(path)
-        path.write_text(json.dumps(obj, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(obj, indent=2), encoding="utf-8")
 
-    def write_invalid_json(path: Path, invalid_entries: list[dict]) -> None:
-        ensure_parent(path)
-        # Write invalid entries and their errors
-        path.write_text(json.dumps(invalid_entries, indent=2), encoding="utf-8")
+
+def write_invalid_json(path: Path, invalid_entries: list[dict]) -> None:
+    ensure_parent(path)
+    # Write invalid entries and their errors
+    path.write_text(json.dumps(invalid_entries, indent=2), encoding="utf-8")
 
 
 def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
