@@ -1006,30 +1006,8 @@ def write_updated_entries(
     config_data: dict[str, Any],
     logger,
 ) -> None:
-    ensure_parent(path)
-    payload_version = (
-        config_data.get("pipeline", {}).get("payload_version") or PACKAGE_VERSION
-    )
-    if not records:
-        PayloadWriter().write_payload([], str(path), version=payload_version)
-        logger.info(
-            f"📦 No accepted candidates; wrote empty updated entries payload to {path}"
-        )
-        return
-
-    entries: list[BioToolsEntry] = []
-    for candidate, scores, homepage in records:
-        try:
-            entry = build_updated_entry(candidate, scores, homepage)
-            entries.append(entry)
-        except Exception as exc:
-            logger.warning(
-                "Skipping candidate '%s' for updated entries: %s",
-                candidate.get("title") or candidate.get("name") or "<unknown>",
-                exc,
-            )
-    PayloadWriter().write_payload(entries, str(path), version=payload_version)
-    logger.info(f"📦 Wrote {len(entries)} updated bio.tools entries to {path}")
+    # Disabled: no longer write biotools_entries.json or updated entries
+    pass
 
 
 def build_updated_entry(
