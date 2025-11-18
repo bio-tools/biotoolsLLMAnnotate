@@ -719,6 +719,50 @@ def to_entry(
         if biotools_id:
             entry["biotoolsID"] = str(biotools_id)
 
+    # Filter documentation to only include valid types according to bio.tools schema
+    if "documentation" in entry:
+        valid_doc_types = {
+            "API documentation",
+            "Citation instructions",
+            "Code of conduct",
+            "Command-line options",
+            "Contributions policy",
+            "FAQ",
+            "General",
+            "Governance",
+            "Installation instructions",
+            "Quick start guide",
+            "User manual",
+            "Release notes",
+            "Terms of use",
+            "Training material",
+            "Other",
+        }
+        docs = entry["documentation"]
+        if isinstance(docs, list):
+            filtered_docs = []
+            for doc in docs:
+                if isinstance(doc, dict) and "type" in doc:
+                    # Filter type array to only include valid types
+                    if isinstance(doc["type"], list):
+                        valid_types = [t for t in doc["type"] if t in valid_doc_types]
+                        if valid_types:
+                            doc["type"] = valid_types
+                            filtered_docs.append(doc)
+                    elif doc["type"] in valid_doc_types:
+                        filtered_docs.append(doc)
+                elif isinstance(doc, dict):
+                    # If no type field, skip it (type is required)
+                    continue
+            if filtered_docs:
+                entry["documentation"] = filtered_docs
+            else:
+                # Remove documentation if no valid entries remain
+                del entry["documentation"]
+        else:
+            # Documentation should be a list, remove if not
+            del entry["documentation"]
+
     return entry
 
 
@@ -2586,9 +2630,24 @@ def execute_run(
                 entry_id = error.get("biotoolsID")
                 entry_name = error.get("name")
                 # Try to find the entry in the original payloads
-                entry = next((e for e in payload_add + payload_review if e.get("biotoolsID") == entry_id or e.get("name") == entry_name), None)
+                entry = next(
+                    (
+                        e
+                        for e in payload_add + payload_review
+                        if e.get("biotoolsID") == entry_id
+                        or e.get("name") == entry_name
+                    ),
+                    None,
+                )
                 if entry:
-                    invalid_entries.append({**entry, "errors": error.get("errors", []), "warnings": error.get("warnings", []), "payload_type": error.get("payload_type")})
+                    invalid_entries.append(
+                        {
+                            **entry,
+                            "errors": error.get("errors", []),
+                            "warnings": error.get("warnings", []),
+                            "payload_type": error.get("payload_type"),
+                        }
+                    )
                 else:
                     invalid_entries.append(error)
             write_invalid_json(invalid_path, invalid_entries)
