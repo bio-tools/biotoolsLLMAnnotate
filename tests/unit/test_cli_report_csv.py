@@ -588,14 +588,17 @@ def test_execute_run_writes_updated_entries_file(
     run_dir = out_dir / "custom_tool_set"
     assert run_dir.exists()
     payload_path = run_dir / "exports" / "biotools_payload.json"
-    updated_path = run_dir / "exports" / "biotools_entries.json"
+    review_payload_path = run_dir / "exports" / "biotools_review_payload.json"
 
     assert payload_path.exists()
-    assert updated_path.exists()
-    data = json.loads(updated_path.read_text())
-    assert data["version"] == __version__
-    assert len(data["entries"]) == 1
-    entry = data["entries"][0]
+    assert review_payload_path.exists()
+    
+    # biotools_entries.json is no longer produced - only payload and review_payload
+    # Verify payload contains the expected entry
+    payload_data = json.loads(payload_path.read_text())
+    assert isinstance(payload_data, list)
+    assert len(payload_data) == 1
+    entry = payload_data[0]
     assert entry["name"] == "Example Tool"
     assert entry["homepage"] == "https://original.example.org"
     assert entry["description"] == "Short summary."
