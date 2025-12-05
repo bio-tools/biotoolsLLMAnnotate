@@ -270,7 +270,7 @@ def test_execute_run_emits_csv_with_identifiers(
     out_dir = tmp_path / "out"
     run_dir = out_dir / "custom_tool_set"
     assert run_dir.exists()
-    report_path = run_dir / "reports" / "assessment.jsonl"
+    report_path = run_dir / "reports" / "assessment.csv"
     csv_path = report_path.with_suffix(".csv")
     with csv_path.open(newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -343,7 +343,7 @@ def test_execute_run_marks_existing_registry(
     out_dir = tmp_path / "out"
     run_dir = out_dir / "custom_tool_set"
     assert run_dir.exists()
-    report_path = run_dir / "reports" / "assessment.jsonl"
+    report_path = run_dir / "reports" / "assessment.csv"
     csv_path = report_path.with_suffix(".csv")
     with csv_path.open(newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -399,7 +399,7 @@ def test_execute_run_filters_publication_homepage(
     out_dir = tmp_path / "out"
     run_dir = out_dir / "custom_tool_set"
     assert run_dir.exists()
-    report_path = run_dir / "reports" / "assessment.jsonl"
+    report_path = run_dir / "reports" / "assessment.csv"
     csv_path = report_path.with_suffix(".csv")
     with csv_path.open(newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -472,19 +472,29 @@ def test_execute_run_publication_only_zero_scores(
     out_dir = tmp_path / "out"
     run_dir = out_dir / "custom_tool_set"
     assert run_dir.exists()
-    report_path = run_dir / "reports" / "assessment.jsonl"
-    lines = report_path.read_text(encoding="utf-8").strip().splitlines()
-    assert len(lines) == 1
-    decision = json.loads(lines[0])
+    report_path = run_dir / "reports" / "assessment.csv"
+
+    # Read CSV file
+    import csv
+
+    with report_path.open("r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+
+    assert len(rows) == 1
+    decision = rows[0]
 
     assert decision["homepage"] == ""
     assert decision["include"] == "do_not_add"
-    assert decision["scores"]["model"] == "rule:no-homepage"
-    assert decision["scores"]["bio_score"] == 0.0
-    assert decision["scores"]["documentation_score"] == 0.0
-    assert decision["scores"]["model_params"]["reason"] == "publication_url"
-    assert decision["scores"]["publication_ids"] == ["pmid:987654"]
-    assert decision.get("in_biotools_name") is None
+    assert decision["model"] == "rule:no-homepage"
+    assert float(decision["bio_score"]) == 0.0
+    assert float(decision["documentation_score"]) == 0.0
+    assert (
+        decision["rationale"]
+        == "Homepage unavailable for scoring (only publication links)."
+    )
+    assert decision["publication_ids"] == "pmid:987654"
+    assert decision.get("in_biotools_name") == ""
 
 
 def test_execute_run_payload_strips_null_fields(tmp_path: Path) -> None:
@@ -592,7 +602,7 @@ def test_execute_run_writes_updated_entries_file(
 
     assert payload_path.exists()
     assert review_payload_path.exists()
-    
+
     # biotools_entries.json is no longer produced - only payload and review_payload
     # Verify payload contains the expected entry
     payload_data = json.loads(payload_path.read_text())
@@ -849,7 +859,7 @@ def test_resume_from_scoring(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
 
     report_dir = range_dir / "reports"
     report_dir.mkdir(parents=True, exist_ok=True)
-    report_path = report_dir / "assessment.jsonl"
+    report_path = report_dir / "assessment.csv"
     cached_rows = [
         {
             "id": "resume-stage",
@@ -903,10 +913,11 @@ def test_resume_from_scoring(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert len(payload) == 1
     assert payload[0]["name"] == "Resume Stage Tool"
 
-    report_lines = [
-        json.loads(line)
-        for line in report_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+    # Read CSV file
+    import csv
+
+    with report_path.open("r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        report_lines = list(reader)
     assert len(report_lines) == 1
     assert report_lines[0]["include"] == "add"

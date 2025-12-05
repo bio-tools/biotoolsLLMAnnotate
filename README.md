@@ -66,6 +66,7 @@ During each run the pipeline scans the Pub2Tools export folders (for example `pu
 | Date range | `pipeline.from_date`, `pipeline.to_date` | `--from-date`, `--to-date` | Accepts relative windows like `7d` or ISO dates |
 | Thresholds | `pipeline.min_bio_score`, `pipeline.min_documentation_score` | `--min-bio-score`, `--min-doc-score` | Set both via legacy `--min-score` if desired |
 | bio.tools API validation | `pipeline.validate_biotools_api` | `--validate-biotools-api` | Validate payload entries against live bio.tools API after scoring (default: `false`). See [bio.tools API Validation Setup](#biotools-api-validation-setup) below. |
+| Upload to bio.tools | `pipeline.upload.enabled` | `--upload` | Upload new entries to bio.tools registry after payload generation (requires `.bt_token` file). See [Uploading to bio.tools](#uploading-to-biotools) below. |
 | Offline mode | `pipeline.offline` | `--offline` | Disables homepage scraping and Europe PMC enrichment |
 | Ollama model | `ollama.model` | `--model` | Defaults to `llama3.2`; override per run |
 | LLM temperature | `ollama.temperature` | (config only) | Lower values tighten determinism; default is `0.01` for high-precision scoring |
@@ -118,6 +119,50 @@ Look for `✓ Found bio.tools authentication token` in the console output. If no
 
 For detailed setup, troubleshooting, and current limitations, see [`docs/BIOTOOLS_API_VALIDATION.md`](docs/BIOTOOLS_API_VALIDATION.md).
 
+## Uploading to bio.tools
+
+After generating and validating payloads, you can upload new entries directly to the bio.tools registry:
+
+1. **Obtain a token** from the bio.tools team (development or production).
+2. **Create `.bt_token` file** in the repository root:
+   ```bash
+   echo "your-token-here" > .bt_token
+   ```
+3. **Run the pipeline with upload enabled**:
+   ```bash
+   biotoolsannotate --upload
+   ```
+
+The pipeline will:
+- Check each entry against the bio.tools registry (via GET request)
+- Upload new entries using POST (returns `201 Created`)
+- Skip entries that already exist with status `"skipped"`
+- Retry transient server errors (503, 504) with exponential backoff
+- Log all outcomes to `upload_results.jsonl`
+
+**Note**: The upload feature only creates new entries. Existing tools will NOT be updated—they are skipped with a status message.
+
+### Upload Configuration
+
+Control upload behavior in your `config.yaml`:
+
+```yaml
+pipeline:
+  upload:
+    enabled: false          # Set true to enable by default
+    retry_attempts: 3       # Number of retries for transient errors
+    retry_delay: 1.0        # Initial delay in seconds (exponential backoff)
+    batch_delay: 0.5        # Delay between entries to avoid rate limits
+    log_file: "upload_results.jsonl"  # Result tracking file
+```
+
+Upload results include:
+- `biotools_id`: Tool identifier
+- `status`: "uploaded", "failed", or "skipped"
+- `error`: Error message if failed
+- `response_code`: HTTP status code
+- `timestamp`: Upload attempt timestamp
+
 ## Generated Outputs
 Each run writes artifacts to one of the following folders:
 
@@ -130,8 +175,7 @@ The selected folder contains:
 | --- | --- |
 | `exports/biotools_payload.json` | biotoolsSchema-compliant payload ready for upload |
 | `exports/biotools_entries.json` | Full entries including enriched metadata |
-| `reports/assessment.jsonl` | Line-delimited scoring results (bio score, doc score, rationale) |
-| `reports/assessment.csv` | Spreadsheet-friendly summary of the JSONL file (includes `in_biotools` and `confidence_score` columns when Pub2Tools snapshots are present; adds `biotools_api_status`, `api_name`, and `api_description` when `--validate-biotools-api` is enabled) |
+| `reports/assessment.csv` | **Primary assessment file** - spreadsheet-friendly scoring results (includes `in_biotools`, `confidence_score`, and **`manual_decision`** for overriding decisions; adds `biotools_api_status`, `api_name`, and `api_description` when `--validate-biotools-api` is enabled) |
 | `cache/enriched_candidates.json.gz` | Cached candidates after enrichment for quick resumes |
 | `logs/ollama/ollama.log` | Human-readable append-only log of every LLM request and response |
 | `ollama/trace.jsonl` | Machine-readable trace with prompt variants, options, statuses, and parsed JSON payloads |
@@ -157,13 +201,36 @@ The LLM now follows an explicit rubric when emitting the `confidence_score` fiel
 ## Resume & Caching
 - `--resume-from-pub2tools`: Reuse the latest `to_biotools.json` export for the active time range.
 - `--resume-from-enriched`: Skip ingestion and reuse `cache/enriched_candidates.json.gz`.
-- `--resume-from-scoring`: Reapply thresholds to a previous `assessment.jsonl` without invoking the LLM.
+- `--resume-from-scoring`: Reapply thresholds to assessment from `assessment.csv` without invoking the LLM. **Supports manual editing** of scores and decisions.
 
 Combine the flags to iterate quickly on scoring thresholds and payload exports without repeating expensive steps.
 
+### Manual Decision Overrides
+
+The `assessment.csv` file now includes a **`manual_decision`** column (first column) that allows you to override the automatic classification:
+
+| manual_decision | Effect |
+| --- | --- |
+| `add` | Force tool into "add" payload regardless of scores |
+| `review` | Force tool into "review" payload |
+| `do_not_add` | Exclude tool from all payloads |
+| *(empty)* | Use automatic classification based on scores and thresholds |
+
+When using `--resume-from-scoring`, you can also edit:
+- **Scores**: `bio_score`, `documentation_score`, and subscores (`bio_A1`-`A5`, `doc_B1`-`B5`)
+- **Registry flags**: `in_biotools_name`, `in_biotools`
+- **Other metadata**: `homepage`, `publication_ids`, `rationale`, etc.
+
+The pipeline will read your changes from the CSV and:
+1. Use `manual_decision` if provided (overrides everything)
+2. Otherwise re-classify based on edited scores and current thresholds
+
+This enables human-in-the-loop refinement without re-running the expensive LLM scoring step.
+
 ## Troubleshooting & Tips
 - Use `--offline` when working without network access; the pipeline disables homepage scraping and publication enrichment automatically.
-- To inspect what the model saw, open the most recent entries in `reports/assessment.jsonl` or the CSV export.
+- To inspect what the model saw, open `reports/assessment.csv` in any spreadsheet program.
+- Use the `manual_decision` column in the CSV to override decisions when resuming from scoring.
 - Health checks against the Ollama host run before scoring. Failures fall back to heuristics and are summarized in the run footer.
 - Adjust logging verbosity with `--quiet` or `--verbose` as needed.
 

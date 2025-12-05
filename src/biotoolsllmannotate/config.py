@@ -49,6 +49,13 @@ DEFAULT_CONFIG_YAML = {
             "add": 0.6,
             "review": 0.5,
         },
+        "upload": {
+            "enabled": False,
+            "retry_attempts": 3,
+            "retry_delay": 1.0,
+            "batch_delay": 0.5,
+            "log_file": "upload_results.jsonl",
+        },
     },
     "ollama": {
         "host": "http://localhost:11434",

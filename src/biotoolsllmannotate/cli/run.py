@@ -7,32 +7,33 @@ import os
 import re
 import shutil
 import sys
-from time import perf_counter
 from collections.abc import Iterable
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Lock
+from time import perf_counter
 from typing import Any, Literal
 
 import yaml
-
-import typer
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 
-from biotoolsllmannotate import __version__ as PACKAGE_VERSION
-from biotoolsllmannotate.io.payload_writer import PayloadWriter
-from biotoolsllmannotate.schema.models import BioToolsEntry
-from biotoolsllmannotate.registry import BioToolsRegistry, load_registry_from_pub2tools
 from biotoolsllmannotate.enrich import (
     is_probable_publication_url,
     normalize_candidate_homepage,
     scrape_homepage_metadata,
 )
 from biotoolsllmannotate.ingest.pub2tools_fetcher import merge_edam_tags
+from biotoolsllmannotate.io.biotools_api import (
+    create_biotools_entry,
+    fetch_biotools_entry,
+    read_biotools_token,
+)
+from biotoolsllmannotate.registry import BioToolsRegistry, load_registry_from_pub2tools
+from biotoolsllmannotate.schema.models import BioToolsEntry
 
 
 def parse_since(value: str | None) -> datetime:
@@ -169,6 +170,7 @@ def generate_biotools_id(tool_name: str) -> str:
         "DeepRank-GNN-esm" -> "deeprank-gnn-esm"
         "ARCTIC-3D" -> "arctic-3d"
         "My Tool Name" -> "my_tool_name"
+
     """
     if not tool_name:
         return ""
@@ -368,13 +370,6 @@ def write_invalid_json(path: Path, invalid_entries: list[dict]) -> None:
     path.write_text(json.dumps(invalid_entries, indent=2), encoding="utf-8")
 
 
-def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
-    ensure_parent(path)
-    with path.open("w", encoding="utf-8") as f:
-        for r in rows:
-            f.write(json.dumps(r) + "\n")
-
-
 def _strip_null_fields(value: Any) -> Any:
     if isinstance(value, dict):
         cleaned: dict[str, Any] = {}
@@ -412,6 +407,7 @@ def _strip_null_fields(value: Any) -> Any:
 def write_report_csv(path: Path, rows: Iterable[dict[str, Any]]) -> None:
     ensure_parent(path)
     fieldnames = [
+        "manual_decision",
         "id",
         "title",
         "tool_name",
@@ -478,6 +474,7 @@ def write_report_csv(path: Path, rows: Iterable[dict[str, Any]]) -> None:
 
             writer.writerow(
                 {
+                    "manual_decision": row.get("manual_decision", ""),
                     "id": row.get("id", ""),
                     "title": row.get("title", ""),
                     "tool_name": scores.get("tool_name", ""),
@@ -666,8 +663,7 @@ def _apply_documentation_penalty(
 def to_entry(
     c: dict[str, Any], homepage: str | None, scores: dict[str, Any] | None = None
 ) -> dict[str, Any]:
-    """
-    Build bio.tools payload entry from candidate.
+    """Build bio.tools payload entry from candidate.
 
     Preserves the original pub2tools structure (function, topic, link, etc.)
     and updates the description field with LLM-generated content from scores.
@@ -788,8 +784,10 @@ def validate_biotools_payload(
         (valid_entries, validation_errors)
         - valid_entries: List of entries that passed validation
         - validation_errors: List of dicts with 'name', 'biotoolsID', and 'errors' keys
+
     """
     from pydantic import ValidationError
+
     from biotoolsllmannotate.io.biotools_api import validate_biotools_entry
 
     valid_entries = []
@@ -934,7 +932,7 @@ def _prepare_output_structure(logger, base: Path | str = Path("out")) -> None:
 
     migrations = [
         (legacy_root / "payload.json", base_path / "exports" / "biotools_payload.json"),
-        (legacy_root / "report.jsonl", base_path / "reports" / "assessment.jsonl"),
+        (legacy_root / "report.jsonl", base_path / "reports" / "assessment.csv"),
         (legacy_root / "report.csv", base_path / "reports" / "assessment.csv"),
         (
             legacy_root / "updated_entries.json",
@@ -971,7 +969,7 @@ def _prepare_output_structure(logger, base: Path | str = Path("out")) -> None:
             ),
             (
                 pipeline / "reports" / "assessment.jsonl",
-                base_path / "reports" / "assessment.jsonl",
+                base_path / "reports" / "assessment.csv",
             ),
             (
                 pipeline / "reports" / "assessment.csv",
@@ -1263,20 +1261,151 @@ def _export_matches_time_period(path: Path, label: str) -> bool:
 
 
 def _load_assessment_report(path: Path) -> list[dict[str, Any]]:
+    """Load assessment report from CSV file."""
+    csv_path = path.with_suffix(".csv")
+    if not csv_path.exists():
+        return []
+    return _load_assessment_from_csv(csv_path)
+
+
+def _load_assessment_from_csv(csv_path: Path) -> list[dict[str, Any]]:
+    """Load and reconstruct assessment data from CSV file."""
     rows: list[dict[str, Any]] = []
-    with path.open("r", encoding="utf-8") as fh:
-        for idx, line in enumerate(fh, start=1):
-            text = line.strip()
-            if not text:
-                continue
-            try:
-                data = json.loads(text)
-            except json.JSONDecodeError as exc:  # pragma: no cover - rare corrupt file
-                raise ValueError(
-                    f"Invalid assessment row at {path}:{idx}: {exc}"
-                ) from exc
-            if isinstance(data, dict):
-                rows.append(data)
+
+    with csv_path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        for csv_row in reader:
+            # Parse publication_ids
+            pub_ids_str = csv_row.get("publication_ids", "").strip()
+            publication_ids = []
+            if pub_ids_str:
+                publication_ids = [
+                    p.strip() for p in pub_ids_str.split(",") if p.strip()
+                ]
+
+            # Parse origin_types
+            origin_str = csv_row.get("origin_types", "").strip()
+            origin_types = []
+            if origin_str:
+                origin_types = [o.strip() for o in origin_str.split(",") if o.strip()]
+
+            # Helper to convert CSV string to float or None
+            def parse_float(val):
+                if not val or str(val).strip() == "":
+                    return None
+                try:
+                    return float(val)
+                except (ValueError, TypeError):
+                    return None
+
+            # Helper to convert CSV string to bool or None
+            def parse_bool(val):
+                if not val or str(val).strip() == "":
+                    return None
+                val_lower = str(val).strip().lower()
+                if val_lower in ("true", "1", "yes"):
+                    return True
+                elif val_lower in ("false", "0", "no"):
+                    return False
+                return None
+
+            # Check for manual override first
+            manual_decision = csv_row.get("manual_decision", "").strip()
+            if manual_decision:
+                # Manual override takes precedence
+                decision = manual_decision
+            else:
+                # Parse decision from include column
+                decision_str = csv_row.get("include", "").strip()
+                if decision_str == "True":
+                    decision = "add"
+                elif decision_str == "False":
+                    decision = "do_not_add"
+                elif decision_str:
+                    decision = decision_str
+                else:
+                    decision = "do_not_add"
+
+            # Reconstruct the bio_subscores
+            bio_subscores = {}
+            for key in ["A1", "A2", "A3", "A4", "A5"]:
+                val = parse_float(csv_row.get(f"bio_{key}"))
+                if val is not None:
+                    bio_subscores[key] = val
+
+            # Reconstruct the documentation_subscores
+            doc_subscores = {}
+            for key in ["B1", "B2", "B3", "B4", "B5"]:
+                val = parse_float(csv_row.get(f"doc_{key}"))
+                if val is not None:
+                    doc_subscores[key] = val
+
+            # Reconstruct the scores object
+            scores = {}
+
+            # Add scalar scores
+            bio_score = parse_float(csv_row.get("bio_score"))
+            if bio_score is not None:
+                scores["bio_score"] = bio_score
+
+            doc_score = parse_float(csv_row.get("documentation_score"))
+            if doc_score is not None:
+                scores["documentation_score"] = doc_score
+
+            confidence = parse_float(csv_row.get("confidence_score"))
+            if confidence is not None:
+                scores["confidence_score"] = confidence
+
+            # Add subscores
+            if bio_subscores:
+                scores["bio_subscores"] = bio_subscores
+            if doc_subscores:
+                scores["documentation_subscores"] = doc_subscores
+
+            # Add text fields
+            if csv_row.get("tool_name"):
+                scores["tool_name"] = csv_row["tool_name"]
+            if csv_row.get("concise_description"):
+                scores["concise_description"] = csv_row["concise_description"]
+            if csv_row.get("rationale"):
+                scores["rationale"] = csv_row["rationale"]
+            if csv_row.get("model"):
+                scores["model"] = csv_row["model"]
+            if origin_types:
+                scores["origin_types"] = origin_types
+
+            # Parse in_biotools fields (can be bool or None)
+            in_biotools_name = parse_bool(csv_row.get("in_biotools_name"))
+            in_biotools = parse_bool(csv_row.get("in_biotools"))
+
+            # Reconstruct the row
+            row = {
+                "id": csv_row.get("id", "").strip(),
+                "title": csv_row.get("title", "").strip(),
+                "homepage": csv_row.get("homepage", "").strip(),
+                "homepage_status": csv_row.get("homepage_status", "").strip() or None,
+                "homepage_error": csv_row.get("homepage_error", "").strip() or None,
+                "publication_ids": publication_ids,
+                "scores": scores,
+                "include": decision,
+                "decision": decision,
+                "manual_decision": manual_decision if manual_decision else None,
+                "in_biotools_name": in_biotools_name,
+                "in_biotools": in_biotools,
+            }
+
+            # Add bio.tools API fields if present
+            if csv_row.get("biotools_api_status"):
+                row["biotools_api_status"] = csv_row["biotools_api_status"]
+            if csv_row.get("api_name"):
+                row["api_name"] = csv_row["api_name"]
+            if csv_row.get("api_status"):
+                row["api_status"] = csv_row["api_status"]
+            if csv_row.get("api_description"):
+                row["api_description"] = csv_row["api_description"]
+
+            rows.append(row)
+
     return rows
 
 
@@ -1348,6 +1477,212 @@ def _resolve_homepage(
     return ""
 
 
+def upload_biotools_entries(
+    add_entries: list[dict[str, Any]],
+    output_dir: Path,
+    api_base: str = "https://bio.tools/api/tool/",
+    retry_attempts: int = 3,
+    retry_delay: float = 1.0,
+    batch_delay: float = 0.5,
+    logger: Any = None,
+) -> dict[str, Any]:
+    """Upload bio.tools entries to the registry.
+
+    Args:
+        add_entries: List of entries to upload from biotools_add.json
+        output_dir: Output directory for upload_results.jsonl
+        api_base: Bio.tools API base URL
+        retry_attempts: Number of retry attempts for transient errors
+        retry_delay: Initial delay for exponential backoff
+        batch_delay: Delay between entries to avoid rate limits
+        logger: Logger instance
+
+    Returns:
+        Dict with upload statistics and results
+
+    """
+    import json as json_lib
+    import time
+
+    if logger is None:
+        from biotoolsllmannotate.io.logging import get_logger
+
+        logger = get_logger()
+
+    # Read token
+    token = read_biotools_token()
+    if not token:
+        logger.error(
+            "❌ --upload requires .bt_token file. Create .bt_token in repository root with bio.tools API token."
+        )
+        raise RuntimeError("bio.tools token not found")
+
+    logger.info("✓ Found bio.tools authentication token")
+
+    upload_stats = {"uploaded": 0, "failed": 0, "skipped": 0, "results": []}
+    results_file = output_dir / "upload_results.jsonl"
+
+    for idx, entry in enumerate(add_entries):
+        biotools_id = entry.get("biotoolsID")
+        if not biotools_id:
+            logger.warning(
+                f"  ⊘ Skipping entry without biotoolsID: {entry.get('name')}"
+            )
+            upload_stats["skipped"] += 1
+            continue
+
+        # Check if entry exists
+        try:
+            existing = fetch_biotools_entry(biotools_id, api_base, token)
+        except Exception as exc:
+            logger.warning(f"  ⚠️  Error checking existence of {biotools_id}: {exc}")
+            result = {
+                "biotools_id": biotools_id,
+                "status": "failed",
+                "error": f"Check existence failed: {str(exc)}",
+                "response_code": 0,
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+            upload_stats["results"].append(result)
+            upload_stats["failed"] += 1
+            with open(results_file, "a") as f:
+                f.write(json_lib.dumps(result) + "\n")
+            continue
+
+        if existing is not None:
+            logger.info(f"  ⊘ Skipping {biotools_id} (already exists on bio.tools)")
+            result = {
+                "biotools_id": biotools_id,
+                "status": "skipped",
+                "error": "Entry already exists",
+                "response_code": 409,
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+            upload_stats["results"].append(result)
+            upload_stats["skipped"] += 1
+            with open(results_file, "a") as f:
+                f.write(json_lib.dumps(result) + "\n")
+            continue
+
+        # Upload new entry
+        logger.info(f"  → Uploading {biotools_id}...")
+        response = create_biotools_entry(
+            entry,
+            api_base=api_base,
+            token=token,
+            retry_attempts=retry_attempts,
+            retry_delay=retry_delay,
+        )
+
+        if response["success"]:
+            logger.info(f"  ✓ Uploaded {biotools_id}")
+            upload_stats["uploaded"] += 1
+            status = "uploaded"
+            error_msg = None
+            code = 201
+        else:
+            logger.warning(f"  ✗ Failed to upload {biotools_id}: {response['error']}")
+            upload_stats["failed"] += 1
+            status = "failed"
+            error_msg = response["error"]
+            code = response.get("status_code", 0)
+
+        result = {
+            "biotools_id": biotools_id,
+            "status": status,
+            "error": error_msg,
+            "response_code": code,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+        upload_stats["results"].append(result)
+
+        # Write result to jsonl log
+        with open(results_file, "a") as f:
+            f.write(json_lib.dumps(result) + "\n")
+
+        # Apply batch delay to avoid rate limiting
+        if idx < len(add_entries) - 1:
+            time.sleep(batch_delay)
+
+    # Print summary
+    logger.info("")
+    logger.info("Upload Summary:")
+    logger.info(f"  ✓ Uploaded: {upload_stats['uploaded']} entries")
+    logger.info(f"  ✗ Failed: {upload_stats['failed']} entries")
+    logger.info(f"  ⊘ Skipped: {upload_stats['skipped']} entries")
+
+    if upload_stats["failed"] > 0:
+        logger.info("")
+        logger.info("Failed Entries:")
+        for result in upload_stats["results"]:
+            if result["status"] == "failed":
+                logger.info(f"  • {result['biotools_id']}: {result['error']}")
+
+    logger.info(f"Detailed results logged to {results_file}")
+
+    return upload_stats
+
+
+def write_upload_report_csv(
+    upload_stats: dict[str, Any],
+    output_dir: Path,
+    api_base: str = "https://bio.tools/api/tool/",
+    logger: Any = None,
+) -> None:
+    """Write a CSV report summarizing upload results with bio.tools URLs.
+
+    Args:
+        upload_stats: Dict with 'results' list from upload_biotools_entries()
+        output_dir: Output directory for the report
+        api_base: Base URL for bio.tools API (used to construct tool URLs)
+        logger: Logger instance
+
+    """
+    if logger is None:
+        from biotoolsllmannotate.io.logging import get_logger
+
+        logger = get_logger(__name__)
+
+    report_path = output_dir / "upload_report.csv"
+    ensure_parent(report_path)
+
+    fieldnames = [
+        "biotoolsID",
+        "status",
+        "bio_tools_url",
+        "error",
+        "response_code",
+        "timestamp",
+    ]
+
+    with report_path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for result in upload_stats.get("results", []):
+            biotools_id = result.get("biotools_id", "")
+            status = result.get("status", "")
+
+            # Construct bio.tools URL for successful uploads
+            if status == "uploaded":
+                bio_tools_url = f"{api_base.rstrip('/')}/{biotools_id}"
+            else:
+                bio_tools_url = ""
+
+            writer.writerow(
+                {
+                    "biotoolsID": biotools_id,
+                    "status": status,
+                    "bio_tools_url": bio_tools_url,
+                    "error": result.get("error") or "",
+                    "response_code": result.get("response_code", ""),
+                    "timestamp": result.get("timestamp", ""),
+                }
+            )
+
+    logger.info(f"Upload report written to {report_path}")
+
+
 def execute_run(
     from_date: str | None = None,
     to_date: str | None = None,
@@ -1379,6 +1714,7 @@ def execute_run(
     validate_biotools_api: bool = False,
     biotools_api_base: str = "https://bio.tools/api/tool/",
     biotools_validate_api_base: str = "https://bio.tools/api/tool/validate/",
+    upload: bool = False,
 ) -> None:
     from biotoolsllmannotate.io.logging import get_logger, setup_logging
 
@@ -1596,7 +1932,7 @@ def execute_run(
         if output is None:
             output = base_output_root / "exports" / "biotools_payload.json"
         if report is None:
-            report = base_output_root / "reports" / "assessment.jsonl"
+            report = base_output_root / "reports" / "assessment.csv"
         if updated_entries is None:
             updated_entries = base_output_root / "exports" / "biotools_entries.json"
         if enriched_cache is None:
@@ -1863,7 +2199,7 @@ def execute_run(
                     resume_export_path = None
             elif env_input:
                 logger.info(
-                    f"INPUT file %s -> %d candidates", env_input, len(candidates)
+                    "INPUT file %s -> %d candidates", env_input, len(candidates)
                 )
                 set_status(
                     0,
@@ -2172,12 +2508,20 @@ def execute_run(
                     homepage, homepage_status, homepage_error
                 )
                 _apply_documentation_penalty(scores, homepage_ok)
-                decision_value = classify_candidate(
-                    scores,
-                    bio_thresholds=bio_thresholds,
-                    doc_thresholds=doc_thresholds,
-                    has_homepage=homepage_ok,
-                )
+
+                # Check if user provided manual override
+                manual_decision = row.get("manual_decision")
+                if manual_decision:
+                    # Use manual override
+                    decision_value = manual_decision
+                else:
+                    # Calculate decision from scores
+                    decision_value = classify_candidate(
+                        scores,
+                        bio_thresholds=bio_thresholds,
+                        doc_thresholds=doc_thresholds,
+                        has_homepage=homepage_ok,
+                    )
 
                 row["homepage"] = homepage
                 row["homepage_status"] = homepage_status
@@ -2562,8 +2906,6 @@ def execute_run(
                     row["biotools_api_status"] = f"error: {exc}"
         logger.info(step_msg(5, "OUTPUT – Write reports and bio.tools payload"))
         set_status(4, "OUTPUT – writing reports")
-        logger.info(f"📝 Writing report to {report}")
-        write_jsonl(report, report_rows)
         report_csv = report.with_suffix(".csv")
         logger.info(f"📝 Writing CSV report to {report_csv}")
         write_report_csv(report_csv, report_rows)
@@ -2579,7 +2921,7 @@ def execute_run(
         bt_token = read_biotools_token()
 
         if bt_token:
-            logger.info(f"✓ Found bio.tools authentication token")
+            logger.info("✓ Found bio.tools authentication token")
         else:
             logger.info(
                 "ℹ No .bt_token file found, will use local validation or unauthenticated API"
@@ -2669,6 +3011,33 @@ def execute_run(
                 config_data=config_data,
                 logger=logger,
             )
+
+            # Upload to bio.tools if requested
+            if upload and payload_add_valid:
+                logger.info("")
+                logger.info("Starting bio.tools upload phase...")
+                set_status(4, "OUTPUT – uploading to bio.tools")
+                try:
+                    upload_config = config_data.get("pipeline", {}).get("upload", {})
+                    upload_stats = upload_biotools_entries(
+                        add_entries=payload_add_valid,
+                        output_dir=output.parent,
+                        api_base=biotools_api_base,
+                        retry_attempts=upload_config.get("retry_attempts", 3),
+                        retry_delay=upload_config.get("retry_delay", 1.0),
+                        batch_delay=upload_config.get("batch_delay", 0.5),
+                        logger=logger,
+                    )
+                    # Generate upload report CSV with bio.tools URLs
+                    write_upload_report_csv(
+                        upload_stats,
+                        output_dir=output.parent,
+                        api_base=biotools_api_base,
+                        logger=logger,
+                    )
+                except Exception as exc:
+                    logger.error(f"❌ Upload failed: {exc}")
+                    raise
         else:
             set_status(4, "OUTPUT – dry-run (payloads skipped)")
 

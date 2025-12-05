@@ -143,12 +143,79 @@ Schema validation is covered by unit tests:
 
 All tests passing (20/20).
 
+## Uploading Entries to bio.tools
+
+As of v0.9.3, the pipeline supports uploading new entries directly to the bio.tools registry using the `--upload` flag.
+
+### How It Works
+
+1. **Token Authentication**: Uses the same `.bt_token` file as validation
+2. **POST to Registry**: Creates new entries via `POST /api/tool/`
+3. **Skip Existing**: Checks for existing entries first; skips if already present
+4. **Retry Logic**: Retries transient server errors (503, 504) with exponential backoff
+5. **Results Tracking**: Logs all outcomes to `upload_results.jsonl` and generates `upload_report.csv`
+
+### Output Files
+
+After upload completes, you'll find:
+- **`upload_results.jsonl`**: Detailed log with one entry per upload attempt (biotoolsID, status, error, response_code, timestamp)
+- **`upload_report.csv`**: Clean summary CSV with bio.tools API URLs for successful uploads:
+  - `biotoolsID`: Tool identifier
+  - `status`: "uploaded", "failed", or "skipped"
+  - `bio_tools_url`: Direct API endpoint link (e.g., `https://bio.tools/api/tool/tool-name` for successful uploads, empty for failed/skipped)
+  - `error`: Error message if upload failed
+  - `response_code`: HTTP status code from API
+  - `timestamp`: When upload was attempted
+
+### Usage
+
+```bash
+# Upload after scoring
+biotoolsannotate --upload
+
+# With custom config
+biotoolsannotate --config myconfig.yaml --upload
+```
+
+### Response Codes
+
+- **201 Created**: Entry uploaded successfully
+- **400 Bad Request**: Validation error (not retried)
+- **401 Unauthorized**: Invalid or missing token (not retried)
+- **409 Conflict**: Entry already exists (not retried)
+- **503/504**: Server error (retried with exponential backoff)
+
+### Configuration
+
+Control upload behavior in `config.yaml`:
+
+```yaml
+pipeline:
+  upload:
+    enabled: false          # Set true to enable by default
+    retry_attempts: 3       # Retries for transient errors
+    retry_delay: 1.0        # Initial delay (exponential backoff: 1s, 2s, 4s)
+    batch_delay: 0.5        # Delay between entries
+    log_file: "upload_results.jsonl"
+```
+
+### Important Notes
+
+- **POST Only**: The upload feature only creates new entries. Existing tools are skipped—no PUT/PATCH operations are performed.
+- **Development vs Production**: Configure the API base URL appropriately:
+  - Development: `https://bio-tools-dev.sdu.dk/api/tool/`
+  - Production: `https://bio.tools/api/tool/`
+
+See the main [README](../README.md#uploading-to-biotools) for complete upload documentation.
+
 ## Future Work
 
-1. Contact bio.tools team for API access documentation
-2. Implement authentication support (API key/token in config)
-3. Add retry logic for transient API errors
-4. Document authentication setup in README
+1. ~~Contact bio.tools team for API access documentation~~ ✓ Completed
+2. ~~Implement authentication support (API key/token in config)~~ ✓ Completed
+3. ~~Add retry logic for transient API errors~~ ✓ Completed
+4. ~~Document authentication setup in README~~ ✓ Completed
+5. Consider adding batch upload support for large datasets
+6. Add progress bars for upload operations
 
 ## References
 
@@ -156,3 +223,4 @@ All tests passing (20/20).
 - bio.tools schema: https://github.com/bio-tools/biotoolsSchema
 - GET endpoint (working): `https://bio.tools/api/tool/{id}?format=json`
 - POST validation (auth required): `https://bio.tools/api/tool/validate/`
+- POST create entry (auth required): `https://bio.tools/api/tool/`

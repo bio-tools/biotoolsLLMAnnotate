@@ -171,6 +171,11 @@ def _run_impl(
         "--config",
         help="Path to config YAML file (default: config.yaml in project root).",
     ),
+    upload: bool = typer.Option(
+        False,
+        "--upload",
+        help="Upload generated bio.tools entries to the bio.tools registry (requires .bt_token file).",
+    ),
 ) -> None:
     """Run the annotation pipeline.
 
@@ -398,6 +403,7 @@ def _run_impl(
             biotools_api_base=biotools_api_base,
             biotools_validate_api_base=biotools_validate_api_base,
             config_file_path=config_source_path,
+            upload=upload,
         )
     except Exception as e:
         import traceback

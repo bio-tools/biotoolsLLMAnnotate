@@ -41,7 +41,7 @@ def test_run_basic_creates_outputs(tmp_path):
     run_dir = out_dir / "custom_tool_set"
     assert run_dir.exists()
     out_payload = run_dir / "exports" / "biotools_payload.json"
-    out_report = run_dir / "reports" / "assessment.jsonl"
+    out_report = run_dir / "reports" / "assessment.csv"
     assert out_payload.exists()
     assert out_report.exists()
     # payload should be JSON (likely an array)

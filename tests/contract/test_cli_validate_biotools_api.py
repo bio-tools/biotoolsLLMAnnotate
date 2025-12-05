@@ -96,12 +96,15 @@ def test_validate_biotools_api_enabled_in_config(tmp_path):
 
     # Check assessment report contains validation status
     assessment_file = (
-        tmp_path / "out" / "custom_tool_set" / "reports" / "assessment.jsonl"
+        tmp_path / "out" / "custom_tool_set" / "reports" / "assessment.csv"
     )
     assert assessment_file.exists(), f"Assessment file not found: {assessment_file}"
 
+    import csv
+
     with open(assessment_file) as f:
-        row = json.loads(f.readline())
+        reader = csv.DictReader(f)
+        row = next(reader)
         # Verify validation was run - biotools_api_status should be present
         assert (
             "biotools_api_status" in row
@@ -113,6 +116,7 @@ def test_validate_biotools_api_enabled_in_config(tmp_path):
             "not_found",
             "no_id",
             "error",
+            "",
         ], f"Unexpected status: {row['biotools_api_status']}"
 
 
@@ -200,16 +204,19 @@ def test_validate_biotools_api_disabled_by_default(tmp_path):
 
     # Check assessment report exists
     assessment_file = (
-        tmp_path / "out" / "custom_tool_set" / "reports" / "assessment.jsonl"
+        tmp_path / "out" / "custom_tool_set" / "reports" / "assessment.csv"
     )
     assert assessment_file.exists(), f"Assessment file not found: {assessment_file}"
 
+    import csv
+
     with open(assessment_file) as f:
-        row = json.loads(f.readline())
-        # Verify validation was NOT run - biotools_api_status should be absent
+        reader = csv.DictReader(f)
+        row = next(reader)
+        # Verify validation was NOT run - biotools_api_status should be empty
         assert (
-            "biotools_api_status" not in row
-        ), f"biotools_api_status field should NOT be present when validation is disabled. Keys: {list(row.keys())}"
+            row.get("biotools_api_status", "") == ""
+        ), f"biotools_api_status field should be empty when validation is disabled. Value: {row.get('biotools_api_status')}"
 
 
 def test_validate_biotools_api_cli_flag_overrides_config(tmp_path):
@@ -300,12 +307,15 @@ def test_validate_biotools_api_cli_flag_overrides_config(tmp_path):
 
     # Check assessment report contains validation status
     assessment_file = (
-        tmp_path / "out" / "custom_tool_set" / "reports" / "assessment.jsonl"
+        tmp_path / "out" / "custom_tool_set" / "reports" / "assessment.csv"
     )
     assert assessment_file.exists(), f"Assessment file not found: {assessment_file}"
 
+    import csv
+
     with open(assessment_file) as f:
-        row = json.loads(f.readline())
+        reader = csv.DictReader(f)
+        row = next(reader)
         # Verify CLI flag override worked - biotools_api_status should be present even though config had False
         assert (
             "biotools_api_status" in row
@@ -317,4 +327,5 @@ def test_validate_biotools_api_cli_flag_overrides_config(tmp_path):
             "not_found",
             "no_id",
             "error",
+            "",
         ], f"Unexpected status: {row['biotools_api_status']}"

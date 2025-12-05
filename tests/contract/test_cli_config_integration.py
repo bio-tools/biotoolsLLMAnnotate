@@ -120,5 +120,5 @@ scoring_prompt_template: 'Please evaluate this bioinformatics tool candidate for
     assert (run_dir / "exports" / "biotools_payload.json").exists()
     # biotools_entries.json is no longer produced
     assert (run_dir / "exports" / "biotools_review_payload.json").exists()
-    assert (run_dir / "reports" / "assessment.jsonl").exists()
+    assert (run_dir / "reports" / "assessment.csv").exists()
     assert (run_dir / "cache" / "enriched_candidates.json.gz").exists()

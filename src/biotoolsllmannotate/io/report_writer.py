@@ -5,8 +5,7 @@ from typing import Any
 
 class ReportWriter:
     def write_report(self, report_lines: list[dict[str, Any]], file_path: str) -> None:
-        """Write a JSONL report: one JSON object per line.
-        """
+        """Write a JSONL report: one JSON object per line."""
         with open(Path(file_path), "w") as f:
             for line in report_lines:
                 f.write(json.dumps(line, ensure_ascii=False) + "\n")
@@ -14,8 +13,7 @@ class ReportWriter:
     def summarize_report(
         self, report_lines: list[dict[str, Any]], file_path: str
     ) -> None:
-        """Write a human-readable summary (Markdown) of the assessment report.
-        """
+        """Write a human-readable summary (Markdown) of the assessment report."""
         lines = [
             "# Assessment Summary\n",
             "| Tool | Bio Score | Documentation | Decision | Rationale |",

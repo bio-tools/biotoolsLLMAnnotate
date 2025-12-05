@@ -29,7 +29,7 @@ def test_resume_from_scoring_empty_assessment_uses_enriched_cache(tmp_path, capl
     pub2tools_dir.mkdir(parents=True)
 
     # Create empty assessment file (simulating the issue)
-    assessment_file = reports_dir / "assessment.jsonl"
+    assessment_file = reports_dir / "assessment.csv"
     assessment_file.write_text("")  # Empty file
 
     # Create enriched cache with test candidate

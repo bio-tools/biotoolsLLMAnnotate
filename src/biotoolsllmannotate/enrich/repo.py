@@ -1,4 +1,3 @@
-
 import requests
 
 
@@ -24,8 +23,7 @@ class RepoEnricher:
         return None
 
     def discover_docs_link(self, repo_url):
-        """Try to discover documentation link from repo main page or README.
-        """
+        """Try to discover documentation link from repo main page or README."""
         readme = self.fetch_readme(repo_url)
         if not readme:
             return None
