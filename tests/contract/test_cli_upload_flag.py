@@ -1,5 +1,6 @@
 """Contract tests for CLI --upload flag integration."""
 
+import re
 from typer.testing import CliRunner
 
 from biotoolsllmannotate.cli.main import app
@@ -7,14 +8,20 @@ from biotoolsllmannotate.cli.main import app
 runner = CliRunner()
 
 
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes from text."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
 def test_cli_upload_flag_exists():
     """Test that --upload flag is recognized by CLI."""
     result = runner.invoke(app, ["run", "--help"])
 
     assert result.exit_code == 0
-    # Verify --upload appears in help text
-    assert "--upload" in result.stdout
-    assert "bio.tools" in result.stdout.lower() or "registry" in result.stdout.lower()
+    # Strip ANSI codes and verify --upload appears in help text
+    clean_stdout = _strip_ansi(result.stdout)
+    assert "--upload" in clean_stdout
+    assert "bio.tools" in clean_stdout.lower() or "registry" in clean_stdout.lower()
 
 
 def test_cli_upload_flag_accepted():
@@ -24,6 +31,7 @@ def test_cli_upload_flag_accepted():
 
     # Should not error on the flag itself
     assert result.exit_code == 0
-    # Verify no "Error:" or "Invalid" messages
-    assert "Error:" not in result.stdout
-    assert "Invalid" not in result.stdout
+    # Strip ANSI codes and verify no "Error:" or "Invalid" messages
+    clean_stdout = _strip_ansi(result.stdout)
+    assert "Error:" not in clean_stdout
+    assert "Invalid" not in clean_stdout

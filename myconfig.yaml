@@ -13,10 +13,16 @@ pipeline:
   biotools_validate_api_base: "https://bio-tools-dev.sdu.dk/api/tool/validate/"
   bio_score_thresholds:
     add: 0.7
-    review: 00.5
+    review: 0.5
   documentation_score_thresholds:
     add: 0.5
     review: 0.3
+  upload:
+    enabled: false          # Set true to enable uploads
+    retry_attempts: 3       # Retries for transient errors (5xx/429)
+    retry_delay: 1.0        # Initial backoff in seconds (exponential)
+    batch_delay: 0.5        # Delay between entries to avoid rate limits
+    log_file: "upload_results.jsonl"  # Detailed upload log
 pub2tools:
   edam_owl: http://edamontology.org/EDAM.owl
   idf: https://github.com/edamontology/edammap/raw/master/doc/biotools.idf
@@ -51,6 +57,8 @@ ollama:
 logging:
   level: INFO
   file: null
+  llm_log: out/logs/ollama/ollama.log
+  llm_trace: out/ollama/trace.jsonl
 scoring_prompt_template: |
   You are evaluating whether a software resource is worth getting registered in bio.tools, the registry for software resources in the life sciences.
 
