@@ -3012,13 +3012,14 @@ def execute_run(
                 logger=logger,
             )
 
-            # Upload to bio.tools if requested
-            if upload and payload_add_valid:
+            # Upload to bio.tools if requested (CLI flag OR config setting)
+            upload_config = config_data.get("pipeline", {}).get("upload", {})
+            upload_enabled = upload or upload_config.get("enabled", False)
+            if upload_enabled and payload_add_valid:
                 logger.info("")
                 logger.info("Starting bio.tools upload phase...")
                 set_status(4, "OUTPUT – uploading to bio.tools")
                 try:
-                    upload_config = config_data.get("pipeline", {}).get("upload", {})
                     upload_stats = upload_biotools_entries(
                         add_entries=payload_add_valid,
                         output_dir=output.parent,
