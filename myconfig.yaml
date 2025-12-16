@@ -18,7 +18,7 @@ pipeline:
     add: 0.5
     review: 0.3
   upload:
-    enabled: false          # Set true to enable uploads
+    enabled: true           # Set true to enable uploads
     retry_attempts: 3       # Retries for transient errors (5xx/429)
     retry_delay: 1.0        # Initial backoff in seconds (exponential)
     batch_delay: 0.5        # Delay between entries to avoid rate limits

@@ -686,7 +686,13 @@ def to_entry(
             entry[key] = value
 
     # Ensure required fields are present
-    name = c.get("title") or c.get("name") or "Unnamed Tool"
+    # Prioritize tool_name from scores (assessment.csv), then fall back to candidate data
+    name = (
+        (scores.get("tool_name") if scores else None)
+        or c.get("title")
+        or c.get("name")
+        or "Unnamed Tool"
+    )
     entry["name"] = str(name)
 
     # Update description with LLM-generated concise_description from scores if available
@@ -1663,8 +1669,12 @@ def write_upload_report_csv(
             biotools_id = result.get("biotools_id", "")
             status = result.get("status", "")
 
-            # Construct bio.tools URL for successful uploads
-            if status == "uploaded":
+            # Construct bio.tools URL for uploaded entries and entries that already exist
+            # (failed with duplicate ID error or skipped during pre-flight check)
+            if status in ("uploaded", "skipped") or (
+                status == "failed"
+                and result.get("error", "").find("already exists") != -1
+            ):
                 bio_tools_url = f"{api_base.rstrip('/')}/{biotools_id}"
             else:
                 bio_tools_url = ""
@@ -3015,6 +3025,7 @@ def execute_run(
             # Upload to bio.tools if requested (CLI flag OR config setting)
             upload_config = config_data.get("pipeline", {}).get("upload", {})
             upload_enabled = upload or upload_config.get("enabled", False)
+            logger.info(f"DEBUG: upload flag={upload}, config enabled={upload_config.get('enabled', False)}, upload_enabled={upload_enabled}, payload_add_valid={len(payload_add_valid) if payload_add_valid else 0} entries")
             if upload_enabled and payload_add_valid:
                 logger.info("")
                 logger.info("Starting bio.tools upload phase...")
