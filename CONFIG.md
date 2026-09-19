@@ -167,8 +167,19 @@ biotools-annotate --write-default-config
 #### `ollama.host`
 - **Type**: String (URL)
 - **Default**: `"http://localhost:11434"`
-- **Description**: Ollama server URL
+- **Description**: Ollama server URL. Can also point at any OpenAI-compatible endpoint (e.g., `https://ai.cloud.sdu.dk/v1` for the UCloud AI service) — set `ollama.api_key` to switch the client to the OpenAI `/chat/completions` protocol.
 - **Example**: `"http://localhost:11434"`
+
+#### `ollama.api_key`
+- **Type**: String or null
+- **Default**: `null`
+- **Description**: API key for an OpenAI-compatible inference endpoint. When set, the client sends requests to `{ollama.host}/chat/completions` with `Authorization: Bearer <key>` (OpenAI chat protocol) instead of Ollama's native `/api/generate`. When null, the client behaves as a plain Ollama client. The key is resolved with this precedence: `ollama.api_key` → env var named by `ollama.api_key_env` → `UCLOUD_INFERENCE_TOK` → `OLLAMA_API_KEY`.
+- **Note**: Keep real keys out of version control — prefer a personal config file (e.g., `myconfig.yaml`) or the env-var variants.
+
+#### `ollama.api_key_env`
+- **Type**: String or null
+- **Default**: `null`
+- **Description**: Name of the environment variable holding the API key (alternative to hardcoding `ollama.api_key`). Example: `"UCLOUD_INFERENCE_TOK"`.
 
 #### `ollama.model`
 - **Type**: String

@@ -312,6 +312,67 @@ class OllamaClient:
 
         return _call()
 
+    def _generate_openai(
+        self,
+        prompt,
+        model,
+        resolved_temperature,
+        resolved_top_p,
+        trace_context: Optional[dict[str, Any]],
+    ) -> tuple[str, dict[str, Any]]:
+        """Call an OpenAI-compatible /chat/completions endpoint."""
+        payload = self._openai_payload(
+            prompt, model, resolved_temperature, resolved_top_p
+        )
+        trace_payload = self._build_trace_payload(prompt, payload, trace_context)
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        try:
+            resp = self.session.post(
+                self._chat_url(),
+                json=payload,
+                headers=headers,
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            raise OllamaConnectionError(
+                f"OpenAI-compatible endpoint HTTP error at {self._chat_url()}: {e}"
+            ) from e
+        except requests.exceptions.RequestException as e:
+            raise OllamaConnectionError(
+                f"Failed to connect to OpenAI-compatible endpoint at {self._chat_url()}: {e}"
+            ) from e
+
+        combined = self._extract_openai_text(resp.text)
+        trace_payload["response_text"] = combined
+
+        def _attempt_parse(text: str) -> str | None:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start == -1 or end == -1 or end <= start:
+                return None
+            candidate = text[start : end + 1]
+            try:
+                json.loads(candidate)
+                return candidate
+            except json.JSONDecodeError:
+                return None
+
+        final_json = _attempt_parse(combined)
+        if final_json is not None:
+            self._log_exchange(payload, final_json, is_json=True)
+            trace_payload["response_json_text"] = final_json
+            return final_json, trace_payload
+
+        self._log_exchange(payload, combined, is_json=False)
+        raise OllamaGenerationError(
+            "No valid JSON object found in OpenAI-compatible endpoint response",
+            trace_payload,
+        )
+
     def ping(self) -> tuple[bool, Optional[str]]:
         """Check whether the Ollama endpoint is reachable."""
         if self.openai_compatible:
