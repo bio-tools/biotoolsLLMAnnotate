@@ -65,6 +65,11 @@ DEFAULT_CONFIG_YAML = {
         "temperature": 0.01,
         "timeout": 300,
         "concurrency": 8,
+        # API key for OpenAI-compatible endpoints. When set (directly or via
+        # the UCLOUD_INFERENCE_TOK / OLLAMA_API_KEY env vars), the client
+        # switches from Ollama's native protocol to the OpenAI
+        # /v1/chat/completions protocol with Bearer auth.
+        "api_key": None,
     },
     "logging": {
         "level": "INFO",

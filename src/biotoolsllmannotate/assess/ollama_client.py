@@ -1,8 +1,10 @@
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
+import os
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -122,6 +124,64 @@ class OllamaClient:
         self.session.mount("https://", adapter)
         self.session.headers.update({"Connection": "keep-alive"})
 
+        # OpenAI-compatible endpoint support (e.g., UCloud AI cloud, vLLM,
+        # llama.cpp server). When an API key is resolved (a literal
+        # api_key, api_key_env naming an env var, or the
+        # UCLOUD_INFERENCE_TOK / OLLAMA_API_KEY env vars), the client
+        # speaks the OpenAI /v1/chat/completions protocol instead of
+        # Ollama's native /api/generate protocol.
+        raw_host = self.base_url or ""
+        self.base_url = raw_host.rstrip("/")
+        api_key_env_name = ollama_cfg.get("api_key_env")
+        env_key = os.environ.get(api_key_env_name) if api_key_env_name else None
+        # Precedence: literal api_key wins over env-var indirection.
+        self.api_key = (
+            ollama_cfg.get("api_key")
+            or env_key
+            or os.environ.get("UCLOUD_INFERENCE_TOK")
+            or os.environ.get("OLLAMA_API_KEY")
+            or None
+        )
+        self.openai_compatible = self.api_key is not None
+
+    def _chat_url(self) -> str:
+        return f"{self.base_url}/chat/completions"
+
+    def _openai_payload(
+        self,
+        prompt: str,
+        model: Optional[str],
+        temperature: float,
+        top_p: float,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "model": model or self.config.get("ollama", {}).get("model"),
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
+            "top_p": top_p,
+        }
+        if self.force_json_format:
+            # OpenAI-style JSON mode
+            payload["response_format"] = {"type": "json_object"}
+        return payload
+
+    def _extract_openai_text(self, resp_text: str) -> str:
+        try:
+            data = json.loads(resp_text)
+        except json.JSONDecodeError:
+            return resp_text
+        if not isinstance(data, dict):
+            return resp_text
+        choices = data.get("choices") or []
+        if not choices:
+            return resp_text
+        message = choices[0].get("message") or {}
+        content = message.get("content")
+        if not content:
+            # fall back to reasoning_content for reasoning models (e.g. GLM)
+            content = message.get("reasoning_content") or ""
+        return content or resp_text
+
     def generate(
         self,
         prompt,
@@ -160,6 +220,15 @@ class OllamaClient:
             if resolved_top_p <= 0:
                 resolved_top_p = self.top_p
 
+            if self.openai_compatible:
+                return self._generate_openai(
+                    prompt,
+                    model,
+                    resolved_temperature,
+                    resolved_top_p,
+                    trace_context,
+                )
+
             payload = {
                 "model": model or self.config.get("ollama", {}).get("model"),
                 "prompt": prompt,
@@ -192,6 +261,7 @@ class OllamaClient:
                 raise OllamaConnectionError(
                     f"Failed to connect to Ollama at {self.base_url}: {e}"
                 ) from e
+
             combined = ""
             thinking_text = ""
             for line in resp.text.strip().splitlines():
@@ -244,6 +314,39 @@ class OllamaClient:
 
     def ping(self) -> tuple[bool, Optional[str]]:
         """Check whether the Ollama endpoint is reachable."""
+        if self.openai_compatible:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                }
+                resp = self.session.post(
+                    self._chat_url(),
+                    headers=headers,
+                    json={
+                        "model": self.config.get("ollama", {}).get("model"),
+                        "messages": [{"role": "user", "content": "ping"}],
+                        "max_tokens": 1,
+                    },
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                return True, None
+            except requests.exceptions.ConnectionError:
+                return (
+                    False,
+                    f"Connection failed: OpenAI-compatible endpoint not available at {self._chat_url()}",
+                )
+            except requests.exceptions.Timeout:
+                return (
+                    False,
+                    f"Timeout: OpenAI-compatible endpoint at {self._chat_url()} took too long to respond",
+                )
+            except requests.exceptions.RequestException as exc:
+                return False, f"Request failed: {exc}"
+            except Exception as exc:
+                return False, f"Unexpected error: {exc}"
+
         try:
             resp = self.session.get(f"{self.base_url}/api/tags", timeout=10)
             resp.raise_for_status()

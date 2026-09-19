@@ -1,0 +1,147 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-labelledby="title desc">
+  <title id="title">BioToolsLLMAnnotate workflow</title>
+  <desc id="desc">A left-to-right workflow showing candidate sources, ingest and de-duplication, evidence enrichment, LLM or heuristic scoring, human review, and bio.tools-ready outputs.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 34px Arial, Helvetica, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 17px Arial, Helvetica, sans-serif; fill: #475569; }
+      .stage-title { font: 700 18px Arial, Helvetica, sans-serif; fill: #0f172a; }
+      .stage-text { font: 400 14px Arial, Helvetica, sans-serif; fill: #334155; }
+      .mini-title { font: 700 13px Arial, Helvetica, sans-serif; fill: #0f172a; }
+      .mini-text { font: 400 12px Arial, Helvetica, sans-serif; fill: #475569; }
+      .label { font: 700 12px Arial, Helvetica, sans-serif; fill: #ffffff; letter-spacing: 0.6px; }
+      .small-label { font: 700 11px Arial, Helvetica, sans-serif; fill: #334155; }
+      .card { fill: #ffffff; stroke-width: 1.2; }
+      .line { stroke: #475569; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .soft-line { stroke: #94a3b8; stroke-width: 2.2; stroke-dasharray: 6 7; fill: none; marker-end: url(#arrow); }
+      .icon-line { stroke: currentColor; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1200" height="520"/>
+  <rect x="28" y="28" width="1144" height="464" rx="22" fill="#ffffff" stroke="#e2e8f0"/>
+
+  <text class="title" x="72" y="82">BioToolsLLMAnnotate workflow</text>
+  <text class="subtitle" x="72" y="113">From publication-derived candidates to reviewed, schema-valid bio.tools annotations.</text>
+
+  <g transform="translate(70 150)">
+    <rect class="card" x="0" y="0" width="152" height="220" rx="12" stroke="#bae6fd"/>
+    <rect x="0" y="0" width="152" height="44" rx="12" fill="#0284c7"/>
+    <path d="M 0 34 Q 0 44 10 44 L 142 44 Q 152 44 152 34 L 152 44 L 0 44 z" fill="#0284c7"/>
+    <text class="label" x="20" y="28">INPUTS</text>
+    <g style="color:#0284c7" transform="translate(22 66)">
+      <path class="icon-line" d="M 10 2 H 58 L 72 16 V 62 H 10 Z"/>
+      <path class="icon-line" d="M 58 2 V 18 H 72"/>
+      <path class="icon-line" d="M 22 28 H 58"/>
+      <path class="icon-line" d="M 22 42 H 52"/>
+    </g>
+    <text class="stage-title" x="20" y="154">Candidates</text>
+    <text class="stage-text" x="20" y="180">Pub2Tools export</text>
+    <text class="stage-text" x="20" y="200">custom JSON</text>
+    <text class="stage-text" x="20" y="220">registry snapshot</text>
+  </g>
+
+  <path class="line" d="M 238 260 H 290"/>
+
+  <g transform="translate(305 150)">
+    <rect class="card" x="0" y="0" width="152" height="220" rx="12" stroke="#bbf7d0"/>
+    <rect x="0" y="0" width="152" height="44" rx="12" fill="#16a34a"/>
+    <path d="M 0 34 Q 0 44 10 44 L 142 44 Q 152 44 152 34 L 152 44 L 0 44 z" fill="#16a34a"/>
+    <text class="label" x="20" y="28">INGEST</text>
+    <g style="color:#16a34a" transform="translate(24 68)">
+      <circle class="icon-line" cx="20" cy="18" r="10"/>
+      <circle class="icon-line" cx="58" cy="18" r="10"/>
+      <circle class="icon-line" cx="39" cy="52" r="10"/>
+      <path class="icon-line" d="M 28 25 L 34 42"/>
+      <path class="icon-line" d="M 50 25 L 44 42"/>
+      <path class="icon-line" d="M 30 18 H 48"/>
+    </g>
+    <text class="stage-title" x="20" y="154">Normalize</text>
+    <text class="stage-text" x="20" y="180">merge EDAM tags</text>
+    <text class="stage-text" x="20" y="200">de-duplicate</text>
+    <text class="stage-text" x="20" y="220">flag known tools</text>
+  </g>
+
+  <path class="line" d="M 473 260 H 525"/>
+
+  <g transform="translate(540 150)">
+    <rect class="card" x="0" y="0" width="152" height="220" rx="12" stroke="#fed7aa"/>
+    <rect x="0" y="0" width="152" height="44" rx="12" fill="#ea580c"/>
+    <path d="M 0 34 Q 0 44 10 44 L 142 44 Q 152 44 152 34 L 152 44 L 0 44 z" fill="#ea580c"/>
+    <text class="label" x="20" y="28">ENRICH</text>
+    <g style="color:#ea580c" transform="translate(25 68)">
+      <circle class="icon-line" cx="37" cy="34" r="25"/>
+      <path class="icon-line" d="M 12 34 H 62"/>
+      <path class="icon-line" d="M 37 9 C 48 22 48 46 37 59"/>
+      <path class="icon-line" d="M 37 9 C 26 22 26 46 37 59"/>
+    </g>
+    <text class="stage-title" x="20" y="154">Evidence</text>
+    <text class="stage-text" x="20" y="180">homepage metadata</text>
+    <text class="stage-text" x="20" y="200">docs and repos</text>
+    <text class="stage-text" x="20" y="220">Europe PMC context</text>
+  </g>
+
+  <path class="line" d="M 708 260 H 760"/>
+
+  <g transform="translate(775 150)">
+    <rect class="card" x="0" y="0" width="152" height="220" rx="12" stroke="#ddd6fe"/>
+    <rect x="0" y="0" width="152" height="44" rx="12" fill="#7c3aed"/>
+    <path d="M 0 34 Q 0 44 10 44 L 142 44 Q 152 44 152 34 L 152 44 L 0 44 z" fill="#7c3aed"/>
+    <text class="label" x="20" y="28">ASSESS</text>
+    <g style="color:#7c3aed" transform="translate(23 66)">
+      <rect class="icon-line" x="12" y="10" width="54" height="44" rx="8"/>
+      <path class="icon-line" d="M 24 24 H 54"/>
+      <path class="icon-line" d="M 24 40 H 43"/>
+      <path class="icon-line" d="M 70 18 L 82 18"/>
+      <path class="icon-line" d="M 70 46 L 82 46"/>
+      <path class="icon-line" d="M 2 18 L 12 18"/>
+      <path class="icon-line" d="M 2 46 L 12 46"/>
+    </g>
+    <text class="stage-title" x="20" y="154">Score</text>
+    <text class="stage-text" x="20" y="180">Ollama rubric</text>
+    <text class="stage-text" x="20" y="200">heuristic fallback</text>
+    <text class="stage-text" x="20" y="220">add / review / skip</text>
+  </g>
+
+  <path class="line" d="M 943 260 H 995"/>
+
+  <g transform="translate(1010 150)">
+    <rect class="card" x="0" y="0" width="152" height="220" rx="12" stroke="#fecdd3"/>
+    <rect x="0" y="0" width="152" height="44" rx="12" fill="#e11d48"/>
+    <path d="M 0 34 Q 0 44 10 44 L 142 44 Q 152 44 152 34 L 152 44 L 0 44 z" fill="#e11d48"/>
+    <text class="label" x="20" y="28">OUTPUTS</text>
+    <g style="color:#e11d48" transform="translate(25 67)">
+      <path class="icon-line" d="M 9 33 L 28 52 L 67 13"/>
+      <path class="icon-line" d="M 8 66 H 75"/>
+      <path class="icon-line" d="M 8 4 H 75"/>
+    </g>
+    <text class="stage-title" x="20" y="154">Publish-ready</text>
+    <text class="stage-text" x="20" y="180">assessment.csv</text>
+    <text class="stage-text" x="20" y="200">bio.tools payloads</text>
+    <text class="stage-text" x="20" y="220">optional upload</text>
+  </g>
+
+  <g transform="translate(315 408)">
+    <rect x="0" y="0" width="570" height="44" rx="22" fill="#f1f5f9" stroke="#cbd5e1"/>
+    <text class="small-label" x="28" y="28">Resume checkpoints:</text>
+    <text class="mini-text" x="150" y="28">Pub2Tools export</text>
+    <circle cx="263" cy="22" r="4" fill="#94a3b8"/>
+    <text class="mini-text" x="279" y="28">enriched cache</text>
+    <circle cx="383" cy="22" r="4" fill="#94a3b8"/>
+    <text class="mini-text" x="399" y="28">assessment report</text>
+  </g>
+  <path class="soft-line" d="M 381 370 V 392 Q 381 408 397 408"/>
+  <path class="soft-line" d="M 616 370 V 392 Q 616 408 632 408"/>
+  <path class="soft-line" d="M 851 370 V 392 Q 851 408 835 408"/>
+
+  <g transform="translate(838 386)">
+    <rect x="0" y="0" width="248" height="48" rx="12" fill="#fff7ed" stroke="#fdba74"/>
+    <text class="mini-title" x="18" y="20">Human-in-the-loop review</text>
+    <text class="mini-text" x="18" y="38">edit scores or manual_decision, then resume</text>
+  </g>
+  <path class="soft-line" d="M 1086 386 Q 1110 346 1086 306"/>
+</svg>

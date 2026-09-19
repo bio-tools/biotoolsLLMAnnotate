@@ -1,12 +1,12 @@
 pipeline:
-  custom_pub2tools_biotools_json: out/biotools_in/to_biotools.json
+  custom_pub2tools_biotools_json: 
   registry_path: out/biotools_in/biotools.json
   payload_version: "__VERSION__"
   from_date: "2025-01-01"
   to_date: "2025-01-02"
   resume_from_pub2tools: false
   resume_from_enriched: false
-  resume_from_scoring: true
+  resume_from_scoring: false
   validate_biotools_api: true
   # bio.tools API configuration (uncomment to use dev server)
   biotools_api_base: "https://bio-tools-dev.sdu.dk/api/tool/"
@@ -31,7 +31,10 @@ pub2tools:
   p2t_cli: bin/pub2tools
   custom_restriction: SRC:MED OR SRC:PMC
   disable_tool_restriction: true
-  timeout: 6000
+  # Read timeout for Europe PMC API requests (ms). Effective jsoup timeout is
+  # 2x this value. Europe PMC is intermittently slow (TTFB up to ~15s+),
+  # so keep this well above observed worst-case latency.
+  timeout: 60000
   retryLimit: 0
   fetcher_threads: 4
 enrichment:
@@ -46,8 +49,9 @@ enrichment:
     timeout: 20
   user_agent: biotoolsllmannotate/__VERSION__ (+https://github.com/ELIXIR-Belgium/biotoolsLLMAnnotate)
 ollama:
-  host: http://localhost:11434
-  model: gemma3:4b #qwen3:4b #gpt-oss:20b-cloud
+  host: https://ai.cloud.sdu.dk/v1
+  model: zai-org/GLM-5.3-Flash
+  api_key: <PASTE-YOUR-UCLOUD-INFERENCE-TOK-HERE>
   max_retries: 1
   num_ctx: 8192
   retry_backoff_seconds: 2

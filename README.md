@@ -17,6 +17,8 @@ CLI tools for discovering, enriching, and annotating bio.tools entries with help
 - [Documentation](#documentation)
 
 ## Overview
+![BioToolsLLMAnnotate workflow](docs/figures/workflow.svg)
+
 - Fetch candidate records from Pub2Tools exports or existing JSON files.
 - Enrich candidates with homepage metadata, documentation links, repositories, and publication context.
 - Score bioinformatics relevance and documentation quality using an Ollama model.
